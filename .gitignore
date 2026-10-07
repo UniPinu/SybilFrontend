@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# the processed-patient cache and the in-flight DICOMs
+backend/cache/
+
+# built by scripts/build_candidates.py (6 MB, rebuild in seconds)
+backend/data/*.parquet
+
+# node / vite
+node_modules/
+dist/
+*.tsbuildinfo
+
+# local scratch
+.DS_Store
+*.log

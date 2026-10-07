@@ -1,0 +1,58 @@
+[project]
+name = "sybil-explorer-backend"
+version = "0.1.0"
+description = "Backend for Sybil Explorer: runs the real Sybil lung-cancer risk model on single NLST CT series."
+requires-python = "==3.10.*"
+dependencies = [
+  # Classic Sybil (v1.6.0 + torch.load hotfix). Never `pip install sybil` -- that is an
+  # unrelated doctest library. Pinned to main@d9fc81b; later tags pull in Sybil-2 deps
+  # (ants, lungmask, cc3d) that only build on Linux x86_64 + CUDA.
+  "sybil @ git+https://github.com/reginabarzilaygroup/Sybil.git@d9fc81b93c1c6239a570c1c570c1f2a2e6266a4a",
+  "idc-index>=0.12",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sse-starlette>=2.1",
+  "pandas>=2.0",
+  "pyarrow>=15",
+  "pillow>=10.2.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+# the `sybil` dependency is a git URL
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
+markers = [
+  "slow: needs model weights and/or network (deselect with -m 'not slow')",
+]
+
+[tool.uv]
+
+# Sybil's setup.cfg requires `torch==1.13.1+cu117` when platform_machine == "x86_64",
+# a wheel that exists only on the PyTorch index (and not for macOS at all). uv resolves
+# universally by default and trips over that marker, so restrict resolution to the two
+# platforms this app supports:
+#   * Apple Silicon (platform_machine == "arm64")  -> plain torch==1.13.1, CPU/MPS
+#   * Windows x64   (platform_machine == "AMD64")  -> plain torch==1.13.1, CPU-only wheel
+# Both take the `platform_machine != "x86_64"` branch of Sybil's marker, so no override
+# or extra index is needed. Linux/Intel-mac users need `tool.uv.override-dependencies`
+# plus the cu117 index -- see README.
+environments = [
+  "sys_platform == 'darwin' and platform_machine == 'arm64'",
+  "sys_platform == 'win32' and platform_machine == 'AMD64'",
+]
