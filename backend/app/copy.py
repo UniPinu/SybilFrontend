@@ -69,6 +69,9 @@ def reveal(outcome: Dict[str, Any], result: Optional[Dict[str, Any]] = None,
             "reminder": FOOTER,
         }
 
+    if outcome.get("eligible") is False:
+        return excluded_reveal(outcome)
+
     risks = (result or {}).get("risk_by_year") or []
     comparison = ""
     if band and band.get("band"):
@@ -113,3 +116,23 @@ def reveal(outcome: Dict[str, Any], result: Optional[Dict[str, Any]] = None,
         "reminder": ("A low risk is not a guarantee, and follow-up ends where the trial's "
                      "records end. " + FOOTER),
     }
+
+
+EXCLUDED_NOTE = ("Sybil's own evaluation leaves scans like this out, so it does not count "
+                 "towards any accuracy figure here.")
+
+
+def excluded_reveal(outcome: Dict[str, Any]) -> Dict[str, str]:
+    """An exam run from Explore that has no 6-year label in Sybil's sense."""
+    years = outcome.get("years_to_cancer")
+    if years is None:
+        headline_text = "This scan is outside Sybil's evaluation rules."
+    elif years < 0:
+        headline_text = "This scan was taken after the person's lung-cancer diagnosis."
+    else:
+        nth = years + 1
+        when = "within a year of this scan" if nth == 1 else f"in year {nth} after this scan"
+        headline_text = f"This person was diagnosed with lung cancer {when}."
+    reason = outcome.get("exclusion_reason")
+    detail = (f"Excluded because: {reason}. " if reason else "") + EXCLUDED_NOTE
+    return {"headline": headline_text, "detail": detail, "reminder": FOOTER}

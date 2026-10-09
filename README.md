@@ -16,7 +16,7 @@ Implements [MVP.md](MVP.md). Section numbers below refer to it.
 | | |
 |---|---|
 | Python | 3.10 (installed for you by `uv`) |
-| Node | 20+ with `pnpm` |
+| Node | 20.19+ (or 22.12+) with `pnpm` |
 | Disk | ~700 MB model weights, ~100 MB IDC index, 4-13 MB per prepared person |
 | Network | public; no account and no credentials for IDC |
 | OS | Windows x64 or Apple Silicon macOS (see [Platforms](#platforms)) |
@@ -29,11 +29,33 @@ Implements [MVP.md](MVP.md). Section numbers below refer to it.
 .\tasks.ps1 pool          # ~45 min: 28 people, one scan at a time
 .\tasks.ps1 dev
 
-# macOS / Linux with make
+# macOS (Apple Silicon) with make
 make setup
 make pool
 make dev
 ```
+
+### On a Mac, from a fresh clone
+
+Apple Silicon only (M1 or later); an Intel Mac cannot install Sybil's pinned torch.
+
+```bash
+xcode-select --install            # git and make, if you don't have them yet
+brew install uv node              # Homebrew: https://brew.sh
+corepack enable pnpm              # pnpm, at the version pinned in frontend/package.json
+
+git clone git@github.com:UniPinu/SybilFrontend.git && cd SybilFrontend
+make setup                        # uv installs Python 3.10 itself; ~700 MB of weights go to ~/.sybil
+make pool                         # optional but recommended, see below
+make dev                          # then open http://localhost:5173
+```
+
+`make setup` checks for `uv`, `node` and `pnpm` first and says what is missing.
+
+The prepared scans (`backend/cache/`) and the candidate tables (`backend/data/*.parquet`) are not in
+git. `setup` rebuilds the tables in under a minute, but the pool has to be prepared again on each
+machine. If you'd rather skip that, copy `backend/cache/patients/` from a machine that already has it:
+the results are plain JSON and WebP and are the same on both platforms.
 
 `setup` installs both halves, downloads Sybil's checkpoints and **verifies the install against the
 score vector the Sybil authors publish for their demo scan**, then builds the candidate list. Nothing
@@ -49,7 +71,7 @@ cd backend
 uv sync --extra dev
 uv run python scripts/smoke_test.py          # weights + install check (M0)
 uv run python scripts/inspect_data.py        # what IDC actually publishes (M0)
-uv run python scripts/build_candidates.py    # 66k candidate exams (M1)
+uv run python scripts/build_candidates.py    # exams, 66k candidates, 24k participants (M1)
 uv run python scripts/prepare_pool.py --pool 16 --reference 12   # (M4)
 uv run uvicorn app.main:app --port 8000 --reload
 
@@ -66,7 +88,9 @@ frontend/  Vite + React + TS + Tailwind v4 + shadcn/ui
    |  fetch JSON / WebP images, EventSource for live progress
    v
 backend/   FastAPI, Python 3.10, one inference worker
+   |-- catalog.py    builds exams / candidates / participants tables
    |-- data.py       candidates + person cards + cohort
+   |-- participants.py  Explore: search, multi-round runs, results over time
    |-- fetch.py      idc-index download of ONE series -> cache/tmp
    |-- runner.py     sybil.Serie + the five-model ensemble, with progress
    |-- attention.py  maps the attention grid back onto the original slices
@@ -79,11 +103,27 @@ backend/   FastAPI, Python 3.10, one inference worker
 One scan at a time, ~83 MB median, deleted as soon as `result.json` is written. The full dataset is
 never downloaded.
 
-### The page
+### The pages
 
-One scrolling story: how it works -> meet a person -> look at the scan -> run Sybil (five experts
-voting, live) -> the prediction (headline number, 1-6 year curve, 100-person icon array) -> where
-Sybil looked (overlay + per-slice attention strip) -> what actually happened -> scoreboard.
+**Story** (`/`, `?p=<exam>`): one scrolling story: how it works -> meet a person -> look at the scan
+-> run Sybil (five experts voting, live) -> the prediction (headline number, 1-6 year curve,
+100-person icon array) -> where Sybil looked (overlay + per-slice attention strip) -> what actually
+happened -> scoreboard.
+
+**Explore** (`?view=explore`): search all 24k participants by ID, demographics, scanner make, number
+of usable rounds, diagnosis and whether anything has been run yet. A participant's page shows the
+trial timeline and one card per screening round (usable, excluded and why, or missing). Tick the
+rounds to run; they queue in round order, each with its own live progress. Once results exist:
+
+* **risk curves** on one calendar: each scan's 1-6 year cumulative risk starts on its own date, with
+  the diagnosis (or last cancer-free date) marked; or **one horizon** (e.g. 6-year risk) per scan;
+* a table of every round's six numbers and the change since the previous round;
+* the scans side by side, each opening on its attention hotspot (they are not registered to each
+  other, and the page says so);
+* **Export CSV**, one row per round, for analysis elsewhere.
+
+Every view is a URL, so a filtered search or a participant can be shared. **Blind mode** hides every
+outcome, so the story's predict-then-reveal works in Explore too. Any round opens in the story view.
 
 ---
 
@@ -118,9 +158,19 @@ instructs:
 
 **Candidate counts.** The MVP's numbers reproduce exactly: 203,087 NLST CT series from 26,254 patients
 in the index; filtering to axial `OPA` series 1.0-2.5 mm, <=150 MB, >=80 instances and taking the
-thinnest per study gives 66,558 exams from 24,163 participants; after applying Sybil's own
-`check_label`/`skip_sample` exclusions, **66,332 candidate exams from 24,094 participants**, 2,074 of
-them diagnosed within six years (3.1%). Median series 82.7 MB, p90 123.3 MB.
+thinnest per participant and round gives 66,511 exams from 24,163 participants; after applying
+Sybil's own `check_label`/`skip_sample` exclusions, **66,285 candidate exams from 24,094
+participants**, 2,073 of them diagnosed within six years (3.1%). Median series 82.7 MB, p90 123.3 MB.
+
+The first build ranked series per *study*, which gave 66,332 candidates: IDC holds two studies for 47
+participant-rounds (some byte-identical, one a B30f/B50f kernel pair), so those people had two
+"exams" with the same id. Ranking per participant and round fixes that; `215006_T1` in the pool was
+computed on the B30f copy, and its cached `meta.json` records which series it actually used.
+
+The 226 exams Sybil's rules exclude are kept in `exams.parquet` and can still be run from Explore,
+flagged and kept off the scoreboard. None is a scan taken after a diagnosis: NLST stopped screening
+diagnosed people. 222 are rounds after the participant's last cancer-free date; 4 have images but no
+screening date in `nlst_prsn`.
 
 **SeriesDescription parsing** (`2,OPA,GE,LSPLUS,LUNG,360,2.5,120,...`) holds on real rows: field 1 is
 the screening round, 2 the series kind, 5 the kernel, 6 the reconstruction FOV, 7 the slice thickness.
@@ -168,7 +218,8 @@ streaming to the browser. The 28-person pool took 42.7 minutes unattended and oc
 ## Platforms
 
 MVP.md targets Apple Silicon. This implementation also runs on Windows x64, which is where it was
-built and verified.
+built and verified. Both platforms install from the same `uv.lock` and `pnpm-lock.yaml`, which include
+the macOS arm64 wheels and native binaries.
 
 Sybil's `setup.cfg` pins `torch==1.13.1+cu117` when `platform_machine == "x86_64"` — a wheel that does
 not exist for macOS, and that `uv`'s universal resolver trips over. Windows reports `AMD64`, so it
@@ -187,7 +238,9 @@ Linux or an Intel Mac needs `tool.uv.override-dependencies` plus the PyTorch cu1
 
 **CPU only.** The PyPI `torch==1.13.1` Windows wheel is CPU-only. There is an RTX 4090 in this machine,
 but torch 1.13's cu117 build predates sm_89 and would not run on it, so CUDA is not an option without
-moving off the pinned torch. MVP.md's MPS experiment (section 6.7) is macOS-only and was not attempted.
+moving off the pinned torch. MVP.md's MPS experiment (section 6.7) is macOS-only and was not attempted, so Macs run on the CPU
+too (`SYBIL_DEVICE=mps` will try it, but scores are only checked on the CPU). Inference time
+depends on the core count: `SYBIL_THREADS` defaults to the number of cores, up to 16.
 CPU is fast enough: ~80 s for the full ensemble.
 
 ---
@@ -207,6 +260,16 @@ CPU is fast enough: ~80 s for the full ensemble.
 | `GET /api/patients/{id}/coronal.webp` | coronal map |
 | `GET /api/patients/{id}/outcome` | the reveal, kept separate so the client cannot peek early |
 | `GET /api/cohort` | every prepared person: 6-year risk + outcome |
+| `GET /api/participants` | Explore search: filters (`q, sex, smoking, race, age_min/max, rounds_min, manufacturer, diagnosed, has_results`), `sort`, paging, facet counts |
+| `GET /api/participants/{nlst_pid}` | demographics, trial timeline, and each round's status, series, cache and job state |
+| `POST /api/participants/{nlst_pid}/runs` | queue `{exam_ids}` (default: every runnable round) in round order |
+| `GET /api/participants/{nlst_pid}/results` | every finished round on one time axis, with the change since the previous round |
+| `GET /api/participants/{nlst_pid}/export.csv` | one row per finished round, for analysis |
+
+Explore shows outcomes by default, because about 4% of participants were ever diagnosed and
+finding them needs the filter. Every Explore endpoint takes `blind=true`, which drops all outcome
+fields, refuses outcome filters and sorting, and replaces exclusion reasons with a neutral one. The
+story page's `/api/patients/*` contract is unchanged.
 
 Interactive docs at <http://localhost:8000/docs>.
 
@@ -238,7 +301,7 @@ attention grid (~100 KB), so the overlays can be redrawn later without another i
 ## Tests
 
 ```bash
-.\tasks.ps1 test-fast     # 83 tests, no model and no network, ~15 s
+.\tasks.ps1 test-fast     # 120 tests, no model and no network, ~15 s
 .\tasks.ps1 test-slow     # runs the real ensemble on the demo scan, ~2 min
 .\tasks.ps1 test          # both, plus the runner-vs-upstream comparison
 ```
@@ -253,6 +316,10 @@ attention grid (~100 KB), so the overlays can be redrawn later without another i
 * `test_pipeline.py` — fetch -> verify -> render -> cache against a synthetic DICOM series: the
   windowing, the WebP artifacts, the aspect-corrected coronal map, the per-patient size budget, that
   the DICOMs are deleted, and that no outcome field reaches `meta.json` or `result.json`.
+* `test_catalog.py` — the exam / participant tables on synthetic rows, round statuses, and the index
+  query (run in DuckDB) keeping one series per participant and round.
+* `test_participants.py` — Explore search, filters and paging, round detail, batch runs in round
+  order, results over time, CSV export, and that `blind=true` leaks no outcome anywhere.
 
 ---
 

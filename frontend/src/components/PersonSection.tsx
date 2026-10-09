@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
 import type { PersonCard } from '@/lib/api'
-import { Dices, FileDown, Lock } from 'lucide-react'
+import { Dices, FileDown, Lock, Users } from 'lucide-react'
 
 type Props = {
   person: PersonCard | undefined
@@ -15,6 +15,8 @@ type Props = {
   onLiveModeChange: (value: boolean) => void
   onPick: () => void
   onUseDemoScan: () => void
+  /** go to Explore and choose someone deliberately */
+  onBrowse: () => void
   /** no prepared people and no candidate list: offer the offline demo scan */
   offerDemoScan: boolean
   revealed: boolean
@@ -27,6 +29,7 @@ export function PersonSection({
   onLiveModeChange,
   onPick,
   onUseDemoScan,
+  onBrowse,
   offerDemoScan,
   revealed,
 }: Props) {
@@ -45,6 +48,10 @@ export function PersonSection({
         <Button size="lg" onClick={onPick} disabled={loading}>
           <Dices className="size-5" aria-hidden />
           {loading ? 'Picking…' : 'Pick a random person'}
+        </Button>
+        <Button variant="outline" size="lg" onClick={onBrowse}>
+          <Users className="size-5" aria-hidden />
+          Choose someone yourself
         </Button>
         {offerDemoScan && (
           <Button variant="outline" size="lg" onClick={onUseDemoScan}>

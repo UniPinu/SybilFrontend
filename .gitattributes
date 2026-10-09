@@ -1,0 +1,7 @@
+# Normalise line endings so a clone works the same on macOS and Windows.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+
+*.png binary
+*.webp binary
+*.parquet binary

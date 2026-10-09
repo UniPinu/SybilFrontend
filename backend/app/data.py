@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import random
+from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -24,21 +25,33 @@ _cache: Dict[str, object] = {}
 BANDS = ("Lower than typical", "Typical", "Higher than typical", "Much higher than typical")
 
 
-def candidates() -> pd.DataFrame:
-    """The candidate table, reloaded if the parquet changed on disk."""
-    path = settings.candidates_path
+def load_table(path: Path, index: str) -> pd.DataFrame:
+    """A parquet from data/, reloaded whenever the file changes on disk."""
     if not path.exists():
         raise FileNotFoundError(
             f"{path} not found. Run: uv run python scripts/build_candidates.py"
         )
     stamp = path.stat().st_mtime
-    if _cache.get("stamp") != stamp:
+    cached = _cache.get(str(path))
+    if cached is None or cached[0] != stamp:
         df = pd.read_parquet(path)
-        df = df.set_index("patient_id", drop=False)
-        _cache["stamp"] = stamp
-        _cache["df"] = df
-        log.info("loaded %d candidates from %s", len(df), path)
-    return _cache["df"]  # type: ignore[return-value]
+        df = df.set_index(index, drop=False)
+        cached = (stamp, df)
+        _cache[str(path)] = cached
+        log.info("loaded %d rows from %s", len(df), path)
+    return cached[1]  # type: ignore[index]
+
+
+def candidates() -> pd.DataFrame:
+    """The exams Sybil's own evaluation would keep: what random picking uses."""
+    return load_table(settings.candidates_path, "patient_id")
+
+
+def exams() -> Optional[pd.DataFrame]:
+    """Every exam with a usable series, including excluded ones (Explore)."""
+    if not settings.exams_path.exists():
+        return None
+    return load_table(settings.exams_path, "patient_id")
 
 
 def have_candidates() -> bool:
@@ -46,13 +59,14 @@ def have_candidates() -> bool:
 
 
 def get_candidate(patient_id: str) -> Optional[dict]:
-    df = candidates()
-    if patient_id not in df.index:
-        return None
-    row = df.loc[patient_id]
-    if isinstance(row, pd.DataFrame):  # duplicate index, should not happen
-        row = row.iloc[0]
-    return _clean(row.to_dict())
+    """An exam by id: a candidate, or failing that an excluded-but-runnable exam."""
+    for df in (candidates(), exams()):
+        if df is not None and patient_id in df.index:
+            row = df.loc[patient_id]
+            if isinstance(row, pd.DataFrame):  # duplicate index, should not happen
+                row = row.iloc[0]
+            return _clean(row.to_dict())
+    return None
 
 
 def _clean(d: dict) -> dict:
@@ -80,6 +94,9 @@ OUTCOME_FIELDS = (
     "years_followed",
     "stage_code",
     "lesion_size_mm",
+    # "excluded: diagnosed before this scan" would give the game away
+    "eligible",
+    "exclusion_reason",
 )
 
 
@@ -149,7 +166,8 @@ def person_card(candidate: dict, *, ready: Optional[bool] = None) -> dict:
         "n_slices": series.get("n_files") or candidate.get("n_instances"),
         "thickness_mm": series.get("thickness_mm") or candidate.get("thickness_mm"),
         "series_size_mb": round(float(candidate.get("series_size_mb") or 0), 1),
-        "kernel": candidate.get("kernel"),
+        # what the cached run actually used, when there is one
+        "kernel": (meta.get("candidate") or {}).get("kernel") or candidate.get("kernel"),
         "in_regression_set": bool(candidate.get("in_regression_set")),
         "set": membership(pid),
         "ready": store.is_ready(pid) if ready is None else ready,
@@ -174,9 +192,14 @@ def outcome_payload(candidate: dict) -> dict:
     years = candidate.get("years_to_cancer")
     years = int(years) if years is not None else None
     followed = candidate.get("years_followed")
+    eligible = candidate.get("eligible", True) is not False
+    within = candidate.get("cancer_within_6y")
     return {
         "patient_id": candidate["patient_id"],
-        "cancer_within_6y": bool(candidate["cancer_within_6y"]),
+        # None for an excluded exam: Sybil's rules give it no 6-year label
+        "cancer_within_6y": bool(within) if eligible and within is not None else None,
+        "eligible": eligible,
+        "exclusion_reason": candidate.get("exclusion_reason") or None,
         # 0 means "diagnosed during the first year after this scan"
         "years_to_cancer": years,
         "diagnosis_year": years + 1 if years is not None else None,
@@ -272,6 +295,8 @@ def cohort() -> List[dict]:
             continue
         cand = get_candidate(pid)
         outcome = store.outcome(pid) or {}
+        if outcome.get("eligible") is False:
+            continue  # outside Sybil's evaluation rules: no place on a scoreboard
         out.append(
             {
                 "patient_id": pid,

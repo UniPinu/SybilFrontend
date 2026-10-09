@@ -54,6 +54,8 @@ class Settings:
 
     # --- data ------------------------------------------------------------
     candidates_file: str = "candidates.parquet"
+    exams_file: str = "exams.parquet"
+    participants_file: str = "participants.parquet"
     max_series_mb: float = float(os.environ.get("MAX_SERIES_MB", "150"))
 
     # --- cache -----------------------------------------------------------
@@ -76,6 +78,14 @@ class Settings:
     @property
     def candidates_path(self) -> Path:
         return self.data_dir / self.candidates_file
+
+    @property
+    def exams_path(self) -> Path:
+        return self.data_dir / self.exams_file
+
+    @property
+    def participants_path(self) -> Path:
+        return self.data_dir / self.participants_file
 
     @property
     def patients_dir(self) -> Path:

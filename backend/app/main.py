@@ -12,17 +12,30 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
 from app import copy as copy_text
 from app import data
+from app import participants as explore
 from app.config import settings
 from app.demo_data import DEMO_PATIENT_ID
 from app.jobs import jobs
 from app.runner import get_model, model_is_loaded, weights_present
-from app.schemas import Cohort, Health, Outcome, PersonCard, RiskResult, RunStarted
+from app.schemas import (
+    Cohort,
+    Health,
+    Outcome,
+    ParticipantDetail,
+    ParticipantPage,
+    ParticipantResults,
+    ParticipantRuns,
+    PersonCard,
+    RiskResult,
+    RunRequest,
+    RunStarted,
+)
 from app.store import store
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -218,6 +231,84 @@ def cohort() -> Cohort:
         people=data.cohort(),
         caveat=copy_text.TRAINING_CAVEAT + " " + copy_text.POOL_CAVEAT,
         published=copy_text.PUBLISHED_METRICS,
+    )
+
+
+# --- Explore: participants and their screening rounds ----------------------
+def _need_participants() -> None:
+    if not explore.have_participants():
+        raise HTTPException(
+            503,
+            "No participants.parquet yet. Run: uv run python scripts/build_candidates.py",
+        )
+
+
+def _explore(call, *args, **kwargs):
+    _need_participants()
+    try:
+        return call(*args, **kwargs)
+    except explore.UnknownParticipant as exc:
+        raise HTTPException(404, f"No participant {exc.args[0]}") from exc
+    except explore.BadRequest as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@app.get("/api/participants", response_model=ParticipantPage)
+def search_participants(
+    q: Optional[str] = Query(None, description="participant id prefix"),
+    sex: Optional[str] = None,
+    smoking: Optional[str] = None,
+    race: Optional[str] = None,
+    age_min: Optional[int] = None,
+    age_max: Optional[int] = None,
+    rounds_min: Optional[int] = Query(None, ge=1, le=3, description="runnable rounds"),
+    manufacturer: Optional[str] = None,
+    diagnosed: Optional[bool] = Query(None, description="not allowed when blind"),
+    has_results: Optional[bool] = None,
+    sort: str = Query("id", description="id, age, rounds, results or dx; prefix - to flip"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=1, le=100),
+    blind: bool = False,
+) -> ParticipantPage:
+    filters = explore.Filters(q=q, sex=sex, smoking=smoking, race=race, age_min=age_min,
+                              age_max=age_max, rounds_min=rounds_min,
+                              manufacturer=manufacturer, diagnosed=diagnosed,
+                              has_results=has_results)
+    return ParticipantPage(**_explore(explore.search, filters, sort=sort, page=page,
+                                      page_size=page_size, blind=blind))
+
+
+@app.get("/api/participants/{nlst_pid}", response_model=ParticipantDetail)
+def participant(nlst_pid: str, blind: bool = False) -> ParticipantDetail:
+    return ParticipantDetail(**_explore(explore.detail, nlst_pid, blind=blind))
+
+
+@app.post("/api/participants/{nlst_pid}/runs", response_model=ParticipantRuns)
+def run_participant(nlst_pid: str, request: Optional[RunRequest] = None) -> ParticipantRuns:
+    _need_participants()
+    if not weights_present():
+        raise HTTPException(
+            503,
+            "Sybil's weights are not downloaded yet (~700 MB). Run: "
+            "uv run python scripts/smoke_test.py",
+        )
+    exam_ids = request.exam_ids if request else None
+    runs = _explore(explore.run, nlst_pid, exam_ids)
+    return ParticipantRuns(nlst_pid=nlst_pid, runs=runs)
+
+
+@app.get("/api/participants/{nlst_pid}/results", response_model=ParticipantResults)
+def participant_results(nlst_pid: str, blind: bool = False) -> ParticipantResults:
+    return ParticipantResults(**_explore(explore.results, nlst_pid, blind=blind))
+
+
+@app.get("/api/participants/{nlst_pid}/export.csv", response_class=PlainTextResponse)
+def participant_export(nlst_pid: str, blind: bool = False) -> PlainTextResponse:
+    body = _explore(explore.export_csv, nlst_pid, blind=blind)
+    return PlainTextResponse(
+        body,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="sybil_{nlst_pid}.csv"'},
     )
 
 

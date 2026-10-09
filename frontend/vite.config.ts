@@ -12,8 +12,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // the FastAPI backend; SSE needs buffering off, which the proxy respects
-      '/api': { target: 'http://localhost:8000', changeOrigin: true },
+      // the FastAPI backend; SSE needs buffering off, which the proxy respects.
+      // 127.0.0.1 rather than localhost: macOS resolves localhost to ::1 first,
+      // and uvicorn only listens on IPv4.
+      '/api': { target: 'http://127.0.0.1:8000', changeOrigin: true },
     },
   },
 })

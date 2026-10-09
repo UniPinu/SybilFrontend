@@ -159,6 +159,13 @@
     --outcome-cancer-text: oklch(0.48 0.18 30);
     --outcome-none-text: oklch(0.45 0.02 250);
 
+    /* Screening rounds in Explore's comparison. Deliberately outside the risk
+       ramp's hues (35-190) so a round never reads as a risk level, dark enough
+       to double as text, and always paired with a dash pattern and a label. */
+    --round-0: oklch(0.5 0.14 235);
+    --round-1: oklch(0.48 0.17 285);
+    --round-2: oklch(0.5 0.18 335);
+
     --scan-panel: oklch(0.16 0.01 260);
     --scan-panel-border: oklch(0.3 0.01 260);
 
@@ -188,6 +195,10 @@
     --outcome-cancer-text: oklch(0.78 0.16 30);
     --outcome-none-text: oklch(0.75 0.02 250);
 
+    --round-0: oklch(0.78 0.11 235);
+    --round-1: oklch(0.78 0.12 285);
+    --round-2: oklch(0.78 0.13 335);
+
     --chart-1: var(--risk-4);
     --chart-2: var(--reference-line);
     --chart-3: var(--risk-2);
@@ -210,6 +221,9 @@
     --color-risk-5-text: var(--risk-5-text);
     --color-outcome-cancer-text: var(--outcome-cancer-text);
     --color-scan-panel: var(--scan-panel);
+    --color-round-0: var(--round-0);
+    --color-round-1: var(--round-1);
+    --color-round-2: var(--round-2);
     --color-scan-panel-border: var(--scan-panel-border);
 }
 

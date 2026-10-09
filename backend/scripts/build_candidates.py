@@ -1,8 +1,9 @@
-"""M1: build `data/candidates.parquet` -- every NLST exam we could demo.
+"""M1: build the exam, candidate and participant tables from the IDC index.
 
 No scans are downloaded here. It queries the local IDC index (DuckDB), parses
 `SeriesDescription`, joins IDC's `nlst_prsn` clinical table and applies the same
-exam-level filters Sybil's own NLST dataset applies. Takes a few seconds.
+exam-level filters Sybil's own NLST dataset applies (see app/catalog.py for what
+each output holds). Takes a few seconds.
 
 Run:  uv run python scripts/build_candidates.py
 """
@@ -14,9 +15,9 @@ import time
 
 import pandas as pd
 
+from app.catalog import ROUNDS, assemble
 from app.config import settings
 from app.idc import get_clinical_client
-from app.labels import describe_person, nlst_label, to_num
 from app.regression_uids import NLST_REGRESSION_SERIES_UIDS
 
 # MVP.md 5.2. NLST packs acquisition info into SeriesDescription, e.g.
@@ -27,7 +28,7 @@ from app.regression_uids import NLST_REGRESSION_SERIES_UIDS
 # FOV, field 7 = slice thickness. The backend re-checks SliceThickness from the
 # DICOM header after download, because this parsing is derived from observed
 # data rather than from a published spec.
-CANDIDATE_SQL = """
+SERIES_CTE = """
 WITH s AS (
   SELECT PatientID, StudyInstanceUID, SeriesInstanceUID, SeriesDescription,
          TRY_CAST(split_part(SeriesDescription, ',', 1) AS INT)    AS study_yr,
@@ -38,7 +39,14 @@ WITH s AS (
          instanceCount, series_size_MB, Manufacturer
   FROM index
   WHERE collection_id = 'nlst' AND Modality = 'CT'
-), ok AS (
+)
+"""
+
+# One series per participant *and round*. Ranking per StudyInstanceUID instead
+# let 47 participants keep two exams for the same round, because IDC holds two
+# studies for them (some byte-identical).
+CANDIDATE_SQL = SERIES_CTE + """
+, ok AS (
   SELECT * FROM s
   WHERE kind = 'OPA'
     AND thickness_mm BETWEEN 1.0 AND 2.5
@@ -46,11 +54,18 @@ WITH s AS (
     AND instanceCount >= 80
     AND study_yr IN (0, 1, 2)
 ), best AS (
-  SELECT *, ROW_NUMBER() OVER (PARTITION BY StudyInstanceUID
-                               ORDER BY thickness_mm, series_size_MB) AS rk
+  SELECT *, ROW_NUMBER() OVER (PARTITION BY PatientID, study_yr
+                               ORDER BY thickness_mm, series_size_MB,
+                                        SeriesInstanceUID) AS rk
   FROM ok
 )
 SELECT * EXCLUDE (rk) FROM best WHERE rk = 1
+"""
+
+# Every round that has *any* CT, so a participant page can tell "imaged, but
+# nothing usable" apart from "no scan at all".
+ROUNDS_SQL = SERIES_CTE + """
+SELECT DISTINCT PatientID, study_yr FROM s WHERE study_yr IN (0, 1, 2)
 """
 
 PRSN_COLUMNS = [
@@ -60,13 +75,14 @@ PRSN_COLUMNS = [
 ]
 
 
-def build(max_mb: float) -> pd.DataFrame:
+def query(max_mb: float):
     client = get_clinical_client()
 
     t0 = time.time()
     series = client.sql_query(CANDIDATE_SQL.format(max_mb=max_mb))
-    print(f"index query: {len(series):,} axial series (thinnest per exam)"
-          f" in {time.time() - t0:.1f}s")
+    rounds_seen = client.sql_query(ROUNDS_SQL)
+    print(f"index query: {len(series):,} axial series (thinnest per participant and round),"
+          f" {len(rounds_seen):,} imaged rounds, in {time.time() - t0:.1f}s")
 
     prsn = client.get_clinical_table("nlst_prsn")
     missing = [c for c in PRSN_COLUMNS if c not in prsn.columns]
@@ -77,52 +93,17 @@ def build(max_mb: float) -> pd.DataFrame:
         )
     prsn = prsn[PRSN_COLUMNS].copy()
     print(f"nlst_prsn: {len(prsn):,} participants, {len(prsn.columns)} columns used")
+    return series, rounds_seen, prsn
 
-    df = series.merge(prsn, left_on="PatientID", right_on="dicom_patient_id", how="inner")
-    print(f"joined: {len(df):,} exams from {df.PatientID.nunique():,} participants")
 
-    regression = set(NLST_REGRESSION_SERIES_UIDS)
-    rows = []
-    dropped: dict[str, int] = {}
-    for row in df.itertuples(index=False):
-        rec = row._asdict()
-        yr = int(rec["study_yr"])
-        label = nlst_label(rec, yr)
-        if not label.valid:
-            dropped[label.reason] = dropped.get(label.reason, 0) + 1
-            continue
-        rows.append(
-            {
-                "patient_id": f"{rec['PatientID']}_T{yr}",
-                "nlst_pid": rec["PatientID"],
-                "study_yr": yr,
-                "study_uid": rec["StudyInstanceUID"],
-                "series_uid": rec["SeriesInstanceUID"],
-                "series_description": rec["SeriesDescription"],
-                "manufacturer": rec["Manufacturer"],
-                "kernel": rec["kernel"],
-                "n_instances": int(rec["instanceCount"]),
-                "series_size_mb": float(rec["series_size_MB"]),
-                "thickness_mm": float(rec["thickness_mm"]),
-                "fov_mm": to_num(rec["fov_mm"]),
-                **describe_person(rec, yr),
-                "cancer_within_6y": label.cancer_within_6y,
-                "years_to_cancer": label.years_to_cancer,
-                "years_followed": label.years_followed,
-                "stage_code": to_num(rec["de_stag"]),
-                "lesion_size_mm": to_num(rec["lesionsize"]),
-                "in_regression_set": rec["SeriesInstanceUID"] in regression,
-            }
-        )
-
-    if dropped:
-        print("dropped exams (same rules as Sybil's skip_sample / check_label):")
-        for reason, n in sorted(dropped.items(), key=lambda kv: -kv[1]):
+def summarise(exams: pd.DataFrame, df: pd.DataFrame, participants: pd.DataFrame,
+              excluded: dict) -> None:
+    print(f"\nexams with a usable series: {len(exams):,}")
+    if excluded:
+        print("excluded from evaluation (same rules as Sybil's skip_sample / check_label),"
+              " still runnable in Explore:")
+        for reason, n in sorted(excluded.items(), key=lambda kv: -kv[1]):
             print(f"  {n:>7,}  {reason}")
-    return pd.DataFrame(rows)
-
-
-def summarise(df: pd.DataFrame) -> None:
     print(f"\ncandidates: {len(df):,} exams from {df.nlst_pid.nunique():,} participants")
     print(f"  cancer within 6y: {int(df.cancer_within_6y.sum()):,}"
           f" ({100 * df.cancer_within_6y.mean():.1f}%)")
@@ -137,23 +118,31 @@ def summarise(df: pd.DataFrame) -> None:
     yrs = df.loc[df.cancer_within_6y, "years_to_cancer"]
     print(f"  years_to_cancer {dict(yrs.value_counts().sort_index())}")
 
+    print(f"\nparticipants: {len(participants):,}"
+          f" (diagnosed at any point: {int(participants.diagnosed.sum()):,})")
+    print(f"  runnable rounds {dict(participants.n_rounds.value_counts().sort_index())}")
+    for yr in ROUNDS:
+        print(f"  T{yr} {dict(participants[f't{yr}_status'].value_counts())}")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--max-mb", type=float, default=settings.max_series_mb,
                     help="series size cap in MB (default %(default)s)")
-    ap.add_argument("--out", default=str(settings.candidates_path))
     args = ap.parse_args()
 
     settings.ensure_dirs()
-    df = build(args.max_mb)
+    series, rounds_seen, prsn = query(args.max_mb)
+    exams, df, participants, excluded = assemble(series, rounds_seen, prsn,
+                                                 NLST_REGRESSION_SERIES_UIDS)
     if df.empty:
         print("no candidates -- refusing to write an empty parquet", file=sys.stderr)
         return 1
-    summarise(df)
-    df.to_parquet(args.out, index=False)
-    mb = len(df.to_parquet(index=False)) / 1e6
-    print(f"\nwrote {args.out} ({mb:.2f} MB)")
+    summarise(exams, df, participants, excluded)
+    for frame, path in ((exams, settings.exams_path), (df, settings.candidates_path),
+                        (participants, settings.participants_path)):
+        frame.to_parquet(path, index=False)
+        print(f"wrote {path} ({path.stat().st_size / 1e6:.2f} MB)")
     return 0
 
 
