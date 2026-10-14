@@ -273,8 +273,9 @@ export function ExploreSearch({ blind, onOpen }: { blind: boolean; onOpen: (pid:
         <h1 id="explore-heading" className="text-3xl font-semibold">Explore participants</h1>
         <p className="max-w-3xl text-muted-foreground">
           {READ_ONLY
-            ? `Every NLST participant whose scans have already been through Sybil. Pick someone and
-               see how Sybil's prediction changes from one yearly screening scan to the next.`
+            ? `Every NLST participant with at least one scan Sybil can read. Pick someone to see their
+               screening rounds and, for anyone already run, how Sybil's prediction changes from one
+               yearly scan to the next. Running new scans is switched off on this site for now.`
             : `Every NLST participant with at least one scan Sybil can read. Pick someone, choose
                which of their yearly screening scans to run, and see how Sybil's prediction changes
                from one scan to the next.`}

@@ -7,9 +7,13 @@ hosted anywhere static (e.g. Cloudflare R2) and nothing runs Sybil.
 
 Layout: a JSON endpoint `/api/x/y` is written to `api/x/y/index.json`, and to
 `index.blind.json` for its `?blind=true` variant. Images keep their URL paths.
-Two files have no endpoint: `api/patients/index.json` (every prepared exam, for
-the random picker) and `api/participants/index[.blind].json` (every participant
-with a result, which the frontend searches itself). The model is never loaded.
+Some files have no endpoint of their own:
+  api/patients/index.json             every prepared exam, for the random picker
+  api/participants/all.json           every participant as a compact table; the
+                                      frontend searches and filters it itself
+  api/participants/<pid>/bundle.json  detail + results, normal and blind, for
+                                      every participant (run or not)
+The model is never loaded.
 
 Run:  uv run python scripts/export_static.py                # -> backend/static_export
       uv run python scripts/export_static.py --out ../somewhere
@@ -71,6 +75,9 @@ def main() -> int:
     pids = sorted(ready_counts())
     print(f"exporting {len(exam_ids)} exams from {len(pids)} participants -> {out}")
 
+    # participants are rewritten in full below; drop files from older layouts
+    shutil.rmtree(out / "api" / "participants", ignore_errors=True)
+
     endpoint("/api/health")
     endpoint("/api/cohort")
     write("api/patients/index.json", {"patient_ids": exam_ids})
@@ -90,25 +97,65 @@ def main() -> int:
                 shutil.copy2(src / "coronal.webp", dst / "coronal.webp")
         print(f"  [{i}/{len(exam_ids)}] {exam_id}", flush=True)
 
-    for pid in pids:
+    # Every participant, run or not: one bundle each with the four answers the
+    # participant page asks for. Built from the same functions and response
+    # schemas as the endpoints, without going through HTTP 96k times.
+    from app import participants as explore
+    from app.data import _clean
+    from app.schemas import ParticipantDetail, ParticipantResults
+
+    everyone = explore.table()
+    ready = explore.ready_counts()
+    print(f"bundling {len(everyone):,} participants")
+    for i, pid in enumerate(everyone["nlst_pid"].tolist(), 1):
+        bundle = {
+            "detail": ParticipantDetail(**explore.detail(pid)).model_dump(mode="json"),
+            "detail_blind": ParticipantDetail(**explore.detail(pid, blind=True)).model_dump(mode="json"),
+            "results": ParticipantResults(**explore.results(pid)).model_dump(mode="json"),
+            "results_blind": ParticipantResults(**explore.results(pid, blind=True)).model_dump(mode="json"),
+        }
+        write(f"api/participants/{pid}/bundle.json", bundle)
+        if i % 2000 == 0:
+            print(f"  {i:,} / {len(everyone):,}", flush=True)
+    for pid in pids:  # CSV export only exists for people with results
         base = f"/api/participants/{pid}"
-        endpoint(base, blind_variant=True)
-        endpoint(f"{base}/results", blind_variant=True)
         write(f"{base.lstrip('/')}/export.csv", fetch(f"{base}/export.csv", text=True))
         write(f"{base.lstrip('/')}/export.blind.csv",
               fetch(f"{base}/export.csv?blind=true", text=True))
 
-    # Search runs in the browser over this list, so page through all of it here.
-    for blind, name in ((False, "index.json"), (True, "index.blind.json")):
-        items, page = [], 1
-        while True:
-            body = fetch(f"/api/participants?has_results=true&page_size=100&page={page}"
-                         f"{'&blind=true' if blind else ''}")
-            items += body["items"]
-            if page * body["page_size"] >= body["total"]:
-                break
-            page += 1
-        write(f"api/participants/{name}", {"items": items})
+    # Search runs in the browser over every participant. As plain objects that
+    # is 11 MB, so strings are dictionary-coded and each person is one row.
+    STATUS = {"eligible": "e", "excluded": "x", "no_usable_series": "u", "no_images": "n"}
+    dicts: dict = {"sex": [], "smoking": [], "race": [], "manufacturer": [], "stage": []}
+
+    def code(kind: str, value):
+        if value is None:
+            return None
+        table = dicts[kind]
+        if value not in table:
+            table.append(value)
+        return table.index(value)
+
+    rows = []
+    for row in everyone.to_dict("records"):
+        item = explore._summary(_clean(row), int(ready.get(row["nlst_pid"], 0)), blind=False)
+        o = item["outcome"]
+        rows.append([
+            item["nlst_pid"], item["age_at_randomization"], code("sex", item["sex"]),
+            code("smoking", item["smoking_status"]), code("race", item["race"]),
+            "".join(STATUS[r["status"]] for r in item["rounds"]), item["n_rounds"], item["n_eligible"],
+            [code("manufacturer", m) for m in item["manufacturers"]], int(item["in_regression_set"]),
+            item["results_ready"], int(o["diagnosed"]), o["years_rand_to_dx"], code("stage", o["stage"]),
+            int(o["cancer_within_6y_any"]),
+        ])
+    write("api/participants/all.json", {
+        "columns": ["nlst_pid", "age", "sex", "smoking", "race", "rounds", "n_rounds", "n_eligible",
+                    "manufacturers", "in_regression_set", "results_ready", "diagnosed",
+                    "years_rand_to_dx", "stage", "cancer_within_6y_any"],
+        "status": {v: k for k, v in STATUS.items()},
+        "dicts": dicts,
+        "rows": rows,
+    })
 
     files = [p for p in out.rglob("*") if p.is_file()]
     size_mb = sum(p.stat().st_size for p in files) / 1e6

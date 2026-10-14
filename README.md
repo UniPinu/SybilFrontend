@@ -316,8 +316,10 @@ The frontend reads two build-time variables:
 ### Read-only deploy (no backend)
 
 Everything already computed can be published as static files: the story view, the scoreboard,
-and Explore for every participant with a result all work, and "Run" replays the cached run.
-Nothing new can be analysed until a real backend is behind `VITE_API_BASE`.
+and Explore all work, and "Run" replays the cached run. Explore lists all ~24k participants (a
+compact table the browser searches itself) and opens any of them from a per-participant bundle;
+rounds without a result simply cannot be run. Nothing new can be analysed until a real backend is
+behind `VITE_API_BASE`.
 
 ```bash
 make static          # backend/static_export: ~400 MB, ~22k files, no model loaded

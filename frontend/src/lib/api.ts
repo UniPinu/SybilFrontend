@@ -346,17 +346,77 @@ function countBy(values: (string | null)[]): Record<string, number> {
   return out
 }
 
-/** What `GET /api/participants` does on the server, over the snapshot's participants. */
+type ParticipantTable = {
+  columns: string[]
+  status: Record<string, RoundStatusName>
+  dicts: { sex: string[]; smoking: string[]; race: string[]; manufacturer: string[]; stage: string[] }
+  rows: [string, number | null, number | null, number | null, number | null, string, number, number,
+    number[], number, number, number, number | null, number | null, number][]
+}
+
+let everyoneCache: Promise<ParticipantSummary[]> | null = null
+
+/** Every participant, decoded from the snapshot's compact table (outcomes included). */
+function everyone(): Promise<ParticipantSummary[]> {
+  everyoneCache ??= get<ParticipantTable>('/api/participants/all.json').then(
+    ({ status, dicts, rows }) => rows.map(([pid, age, sex, smoking, race, rounds, nRounds, nEligible,
+      makes, inReg, ready, diagnosed, yearsToDx, stage, within6]) => ({
+      nlst_pid: pid,
+      display_id: `Participant ${pid}`,
+      age_at_randomization: age,
+      sex: sex == null ? null : dicts.sex[sex],
+      smoking_status: smoking == null ? null : dicts.smoking[smoking],
+      race: race == null ? null : dicts.race[race],
+      rounds: [...rounds].map((c, k) => ({ round: `T${k}`, status: status[c] })),
+      n_rounds: nRounds,
+      n_eligible: nEligible,
+      manufacturers: makes.map((m) => dicts.manufacturer[m]),
+      in_regression_set: inReg === 1,
+      results_ready: ready,
+      outcome: {
+        diagnosed: diagnosed === 1,
+        years_rand_to_dx: yearsToDx,
+        stage: stage == null ? null : dicts.stage[stage],
+        cancer_within_6y_any: within6 === 1,
+      },
+    })),
+    (error) => {
+      everyoneCache = null
+      throw error
+    },
+  )
+  return everyoneCache
+}
+
+type Bundle = {
+  detail: ParticipantDetail
+  detail_blind: ParticipantDetail
+  results: ParticipantResults
+  results_blind: ParticipantResults
+}
+
+const bundles = new Map<string, Promise<Bundle>>()
+
+/** One file per participant holds everything their page needs, normal and blind. */
+function bundle(pid: string): Promise<Bundle> {
+  let b = bundles.get(pid)
+  if (!b) {
+    b = get<Bundle>(`/api/participants/${pid}/bundle.json`)
+    b.catch(() => bundles.delete(pid))
+    bundles.set(pid, b)
+  }
+  return b
+}
+
+/** What `GET /api/participants` does on the server, over every participant in the snapshot. */
 async function searchSnapshot(query: SearchQuery): Promise<ParticipantPage> {
   const blind = query.blind === true || query.blind === 'true'
-  const { items: everyone } = await get<{ items: ParticipantSummary[] }>(
-    `/api/participants/index${blind ? '.blind' : ''}.json`,
-  )
+  const all = await everyone()
   const text = (key: string) => (query[key] == null || query[key] === '' ? null : String(query[key]))
   const num = (key: string) => (text(key) == null ? null : Number(text(key)))
 
   const q = text('q')?.trim()
-  const hits = everyone.filter((p) => {
+  const hits = all.filter((p) => {
     if (q && !p.nlst_pid.startsWith(q)) return false
     if (text('sex') && p.sex !== text('sex')) return false
     if (text('smoking') && p.smoking_status !== text('smoking')) return false
@@ -368,8 +428,7 @@ async function searchSnapshot(query: SearchQuery): Promise<ParticipantPage> {
     if (text('manufacturer') && !p.manufacturers.includes(text('manufacturer')!)) return false
     if (text('diagnosed') != null && !blind
         && (p.outcome?.diagnosed ?? false) !== (text('diagnosed') === 'true')) return false
-    // everyone in the snapshot has a result
-    if (text('has_results') === 'false') return false
+    if (text('has_results') != null && (p.results_ready > 0) !== (text('has_results') === 'true')) return false
     return true
   })
 
@@ -389,24 +448,43 @@ async function searchSnapshot(query: SearchQuery): Promise<ParticipantPage> {
 
   const pageSize = Math.max(1, Math.min(num('page_size') ?? 25, 100))
   const page = Math.max(1, num('page') ?? 1)
-  const ages = everyone.map((p) => p.age_at_randomization).filter((a): a is number => a != null)
-  const facets: Facets = {
-    sex: countBy(everyone.map((p) => p.sex)),
-    smoking: countBy(everyone.map((p) => p.smoking_status)),
-    race: countBy(everyone.map((p) => p.race)),
-    manufacturer: countBy(everyone.flatMap((p) => p.manufacturers)),
-    rounds: countBy(everyone.map((p) => String(p.n_rounds))),
-    age: [Math.min(...ages), Math.max(...ages)],
-    with_results: everyone.length,
-  }
-  if (!blind) facets.diagnosed = everyone.filter((p) => p.outcome?.diagnosed).length
+  facetsCache ??= facetsOf(all)
+  const facets: Facets = { ...facetsCache }
+  if (blind) delete facets.diagnosed
   return {
     total: hits.length,
     page,
     page_size: pageSize,
     blind,
-    items: hits.slice((page - 1) * pageSize, page * pageSize),
+    // blind mode hides every outcome, exactly as the server does
+    items: hits.slice((page - 1) * pageSize, page * pageSize)
+      .map((p) => (blind ? { ...p, outcome: null } : p)),
     facets,
+  }
+}
+
+let facetsCache: Facets | null = null
+
+/** The filter counts, computed once over everyone (the same numbers the server reports). */
+function facetsOf(all: ParticipantSummary[]): Facets {
+  let lo = Infinity
+  let hi = -Infinity
+  for (const p of all) {
+    if (p.age_at_randomization == null) continue
+    lo = Math.min(lo, p.age_at_randomization)
+    hi = Math.max(hi, p.age_at_randomization)
+  }
+  const makes: Record<string, number> = {}
+  for (const p of all) for (const m of p.manufacturers) makes[m] = (makes[m] ?? 0) + 1
+  return {
+    sex: countBy(all.map((p) => p.sex)),
+    smoking: countBy(all.map((p) => p.smoking_status)),
+    race: countBy(all.map((p) => p.race)),
+    manufacturer: Object.fromEntries(Object.entries(makes).sort((a, b) => b[1] - a[1])),
+    rounds: countBy(all.map((p) => String(p.n_rounds))),
+    age: [lo, hi],
+    with_results: all.filter((p) => p.results_ready > 0).length,
+    diagnosed: all.filter((p) => p.outcome?.diagnosed).length,
   }
 }
 
@@ -427,13 +505,17 @@ const readOnlyApi = {
     return { job_id: null, patient_id: id, ready: true, state: 'done' }
   },
   searchParticipants: searchSnapshot,
-  participant: (pid: string, blind: boolean) =>
-    snap<ParticipantDetail>(`/api/participants/${pid}`, blind),
+  participant: async (pid: string, blind: boolean) => {
+    const b = await bundle(pid)
+    return blind ? b.detail_blind : b.detail
+  },
   runParticipant: async (_pid: string, _examIds: string[]): Promise<{ nlst_pid: string; runs: RoundRun[] }> => {
     throw new ApiError(OFFLINE_MESSAGE, 503)
   },
-  participantResults: (pid: string, blind: boolean) =>
-    snap<ParticipantResults>(`/api/participants/${pid}/results`, blind),
+  participantResults: async (pid: string, blind: boolean) => {
+    const b = await bundle(pid)
+    return blind ? b.results_blind : b.results
+  },
   exportUrl: (pid: string, blind: boolean) =>
     `${API_BASE}/api/participants/${pid}/export${blind ? '.blind' : ''}.csv`,
 }
