@@ -1,7 +1,7 @@
 [project]
 name = "sybil-explorer-backend"
 version = "0.1.0"
-description = "Backend for Sybil Explorer: runs the real Sybil lung-cancer risk model on single NLST CT series."
+description = "Backend for CTscannr: runs the real Sybil lung-cancer risk model on single NLST CT series."
 requires-python = "==3.10.*"
 dependencies = [
   # Classic Sybil (v1.6.0 + torch.load hotfix). Never `pip install sybil` -- that is an

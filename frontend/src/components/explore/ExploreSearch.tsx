@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { NativeSelect } from '@/components/ui/native-select'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, ApiError, type Facets, type ParticipantSummary } from '@/lib/api'
+import { api, ApiError, READ_ONLY, type Facets, type ParticipantSummary } from '@/lib/api'
 import { setParams, useSearchParams } from '@/lib/url'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, RotateCcw, Search } from 'lucide-react'
@@ -272,9 +272,12 @@ export function ExploreSearch({ blind, onOpen }: { blind: boolean; onOpen: (pid:
       <header className="space-y-2">
         <h1 id="explore-heading" className="text-3xl font-semibold">Explore participants</h1>
         <p className="max-w-3xl text-muted-foreground">
-          Every NLST participant with at least one scan Sybil can read. Pick someone, choose which of
-          their yearly screening scans to run, and see how Sybil's prediction changes from one scan
-          to the next.
+          {READ_ONLY
+            ? `Every NLST participant whose scans have already been through Sybil. Pick someone and
+               see how Sybil's prediction changes from one yearly screening scan to the next.`
+            : `Every NLST participant with at least one scan Sybil can read. Pick someone, choose
+               which of their yearly screening scans to run, and see how Sybil's prediction changes
+               from one scan to the next.`}
         </p>
       </header>
 

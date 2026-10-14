@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { API_BASE } from '@/lib/api'
 
 /** The stages the backend emits, in the order they happen (MVP.md 6.3). */
 export const STAGES = [
@@ -68,7 +69,7 @@ export function useJobEvents(jobId: string | null): JobState {
     setState({ ...EMPTY, stage: 'queued' })
     startedAt.current = performance.now()
 
-    const source = new EventSource(`/api/jobs/${jobId}/events`)
+    const source = new EventSource(`${API_BASE}/api/jobs/${jobId}/events`)
     const tick = window.setInterval(() => {
       setState((prev) =>
         prev.finished ? prev : { ...prev, elapsed: (performance.now() - startedAt.current) / 1000 },

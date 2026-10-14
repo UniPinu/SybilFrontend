@@ -1,4 +1,5 @@
-import { Hero } from '@/components/Hero'
+import { HomeNotices } from '@/components/Hero'
+import { ResearchBody, ResearchHero } from '@/components/research/ResearchSection'
 import { PersonSection } from '@/components/PersonSection'
 import { PredictionSection } from '@/components/PredictionSection'
 import { RevealSection } from '@/components/RevealSection'
@@ -7,7 +8,7 @@ import { ScanViewer } from '@/components/ScanViewer'
 import { Scoreboard } from '@/components/Scoreboard'
 import { SiteFooter } from '@/components/SiteFooter'
 import { useJobEvents, type JobState, type StageName } from '@/hooks/useJobEvents'
-import { api, ApiError, type Outcome } from '@/lib/api'
+import { api, ApiError, READ_ONLY, type Outcome } from '@/lib/api'
 import { goTo, setParams } from '@/lib/url'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -178,7 +179,9 @@ export function StoryView() {
   return (
     <>
       <main className="mx-auto max-w-6xl space-y-16 px-4 pb-10">
-        <Hero health={health.data} />
+        <ResearchHero />
+        <ResearchBody />
+        <HomeNotices health={health.data} />
 
         <PersonSection
           person={person.data}
@@ -189,6 +192,7 @@ export function StoryView() {
           onUseDemoScan={() => selectPatient('demo_offline')}
           onBrowse={() => goTo({ view: 'explore' })}
           offerDemoScan={
+            !READ_ONLY &&
             !!health.data && health.data.cache.pool === 0 && health.data.weights_present
           }
           revealed={revealed}

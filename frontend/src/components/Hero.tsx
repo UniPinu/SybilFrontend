@@ -1,26 +1,7 @@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import type { Health } from '@/lib/api'
-import { Brain, Download, LineChart, ScanLine } from 'lucide-react'
-
-const STEPS = [
-  {
-    icon: ScanLine,
-    title: 'One ordinary CT scan',
-    body: 'A low-dose chest CT, the kind used for lung screening. No contrast, no extra tests, no questionnaire.',
-  },
-  {
-    icon: Brain,
-    title: 'Sybil studies every slice',
-    body: 'The scan is a stack of about 150 cross-sections. Sybil reads the whole stack at once, the way a radiologist flips through it.',
-  },
-  {
-    icon: LineChart,
-    title: 'A risk for each of the next 6 years',
-    body: 'Not a yes or no. Six numbers: the chance of a lung-cancer diagnosis by year 1, 2, 3, 4, 5 and 6.',
-  },
-]
+import { READ_ONLY, type Health } from '@/lib/api'
+import { Archive, Download } from 'lucide-react'
 
 const FAQ = [
   {
@@ -50,25 +31,33 @@ const FAQ = [
   },
 ]
 
-export function Hero({ health }: { health: Health | undefined }) {
-  const weightsMissing = health && !health.weights_present
-  const noCandidates = health && !health.candidates.available
+/** Above the try-it-yourself part of the homepage: setup and read-only notices, and the FAQ. */
+export function HomeNotices({ health }: { health: Health | undefined }) {
+  // a snapshot's health describes the machine it was taken on, not this site
+  const weightsMissing = !READ_ONLY && health && !health.weights_present
+  const noCandidates = !READ_ONLY && health && !health.candidates.available
 
   return (
-    <section id="how-it-works" className="section-anchor space-y-8 pt-10">
-      <div className="space-y-4">
-        <p className="text-sm font-medium tracking-wide text-muted-foreground uppercase">
-          One scan. Six years ahead.
-        </p>
-        <h1 className="text-4xl leading-tight font-semibold text-balance sm:text-5xl">
-          Can a computer spot lung cancer years before it appears?
-        </h1>
-        <p className="max-w-2xl text-lg text-muted-foreground">
-          Sybil reads a single low-dose chest CT and estimates the chance of a lung-cancer diagnosis in
-          each of the next six years. Pick a real person from a public screening trial, look at their
-          scan, run the model, and then find out what actually happened to them.
+    <section id="try" className="section-anchor space-y-6 border-t pt-12">
+      <div className="space-y-2">
+        <p className="text-xs font-medium tracking-widest text-muted-foreground uppercase">6 · Try it yourself</p>
+        <h2 className="text-2xl font-semibold sm:text-3xl">One scan, six years ahead</h2>
+        <p className="max-w-2xl text-muted-foreground">
+          Pick a real person from the screening trial, look at their scan, run Sybil on it, and then find
+          out what actually happened to them.
         </p>
       </div>
+
+      {READ_ONLY && (
+        <Alert>
+          <Archive className="size-4" />
+          <AlertTitle>Showing results that were already computed</AlertTitle>
+          <AlertDescription>
+            Everyone you can pick here has already been through Sybil, so you see the real model's
+            output, replayed. Running Sybil on new scans is switched off on this site for now.
+          </AlertDescription>
+        </Alert>
+      )}
 
       {weightsMissing && (
         <Alert>
@@ -101,23 +90,6 @@ export function Hero({ health }: { health: Health | undefined }) {
           </AlertDescription>
         </Alert>
       )}
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        {STEPS.map((step, index) => (
-          <Card key={step.title} className="h-full">
-            <CardHeader>
-              <div className="flex items-center gap-3">
-                <span className="flex size-10 items-center justify-center rounded-full bg-muted">
-                  <step.icon className="size-5" aria-hidden />
-                </span>
-                <span className="text-xs font-medium text-muted-foreground">Step {index + 1}</span>
-              </div>
-              <CardTitle className="pt-2 text-lg">{step.title}</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">{step.body}</CardContent>
-          </Card>
-        ))}
-      </div>
 
       <Accordion type="single" collapsible className="max-w-3xl">
         <AccordionItem value="more">

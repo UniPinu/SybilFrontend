@@ -1,11 +1,21 @@
-# Sybil Explorer
+# CTscannr
 
-An interactive, beginner-friendly showcase of **Sybil**, the MIT/MGH deep-learning model that predicts
+A research project on whether **successive** low-dose CT scans can sharpen lung-cancer risk estimates,
+built on an interactive, beginner-friendly showcase of **Sybil**, the MIT/MGH deep-learning model that predicts
 a person's lung-cancer risk for the next six years from a **single low-dose chest CT scan**.
 
 The app really runs Sybil. It picks a real, de-identified participant from the National Lung Screening
 Trial (NLST), fetches that one scan from the NCI Imaging Data Commons, runs the five-model ensemble on
 this machine, shows where the model looked, and then reveals what actually happened to that person.
+
+Three views:
+
+- **Homepage**: the research question (aligning Sybil's curves from T0, T1 and T2 on one clock, and
+  using the T0 → T1 offset to nudge T1 towards T2), with diagrams built from a real participant, followed
+  by the original pick-a-person story.
+- **Explore**: search participants and run several of their screening rounds.
+- **Visualiser**: one real scan followed through every step of the model in three.js, replayed from a
+  recorded run (`make visualiser`, plan in [docs/visualiser-plan.md](docs/visualiser-plan.md)).
 
 Implements [MVP.md](MVP.md). Section numbers below refer to it.
 
@@ -295,6 +305,42 @@ renderer now measures the middle slice and steps the quality down until the pati
 MB**; the single noisiest 249-slice scan still lands at 16.3 MB, because quality stops at the floor
 rather than smudging a scan that is genuinely full of detail. `result.json` also carries the 25x16x16
 attention grid (~100 KB), so the overlays can be redrawn later without another inference pass.
+
+The frontend reads two build-time variables:
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `VITE_API_BASE` | empty (same origin) | where the API lives, e.g. `https://api.example.com` |
+| `VITE_READ_ONLY` | unset | `1`: read the static snapshot below and never run Sybil |
+
+### Read-only deploy (no backend)
+
+Everything already computed can be published as static files: the story view, the scoreboard,
+and Explore for every participant with a result all work, and "Run" replays the cached run.
+Nothing new can be analysed until a real backend is behind `VITE_API_BASE`.
+
+```bash
+make static          # backend/static_export: ~400 MB, ~22k files, no model loaded
+```
+
+That is too big for a Vercel Hobby deploy (100 MB, 15k files), so the snapshot goes to a
+Cloudflare R2 bucket and only the app goes to Vercel:
+
+1. **R2:** create a bucket, enable its public `r2.dev` URL, and set this CORS policy so the site
+   can fetch the JSON:
+   ```json
+   [{ "AllowedOrigins": ["https://your-domain.com", "http://localhost:5173"],
+      "AllowedMethods": ["GET", "HEAD"], "AllowedHeaders": ["*"], "MaxAgeSeconds": 86400 }]
+   ```
+2. **Upload:** create an R2 API token (Object Read & Write), `brew install rclone`, and add a
+   remote named `r2` with `rclone config` (type `s3`, provider `Cloudflare`, the token's keys,
+   endpoint `https://<account-id>.r2.cloudflarestorage.com`). Then
+   `make upload-static R2_BUCKET=<bucket>`. Run it again after `make static` to publish new results.
+3. **Vercel:** import the repo with root directory `frontend` (framework: Vite), and set
+   `VITE_READ_ONLY=1` and `VITE_API_BASE=https://pub-<id>.r2.dev`.
+
+When the backend has a server of its own, drop `VITE_READ_ONLY`, point `VITE_API_BASE` at it,
+add the site's origin to the backend's CORS list, and redeploy.
 
 ---
 

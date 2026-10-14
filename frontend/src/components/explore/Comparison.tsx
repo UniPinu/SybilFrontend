@@ -13,7 +13,7 @@ import { Slider } from '@/components/ui/slider'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Toggle } from '@/components/ui/toggle'
-import { api, type ExamResult, type ParticipantResults } from '@/lib/api'
+import { api, READ_ONLY, type ExamResult, type ParticipantResults } from '@/lib/api'
 import { YEARS, pct, prefersReducedMotion } from '@/lib/format'
 import { Crosshair, Download, ExternalLink } from 'lucide-react'
 import { useId, useState } from 'react'
@@ -322,7 +322,9 @@ export function Comparison({ results, onOpenStory }: Props) {
           <p className="max-w-3xl text-muted-foreground">
             {several
               ? 'Each scan gets its own prediction for the six years after it was taken. Lined up on one calendar, you can see whether later scans looked riskier.'
-              : 'Run another round to compare scans over time.'}
+              : READ_ONLY
+                ? 'Only one round of this participant has been run so far.'
+                : 'Run another round to compare scans over time.'}
           </p>
         </div>
         <Button variant="outline" size="sm" asChild>

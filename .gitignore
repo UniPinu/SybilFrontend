@@ -19,3 +19,6 @@ dist/
 # local scratch
 .DS_Store
 *.log
+
+# read-only snapshot for static hosting (scripts/export_static.py)
+backend/static_export/

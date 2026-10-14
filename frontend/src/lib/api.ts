@@ -271,13 +271,24 @@ export class ApiError extends Error {
   }
 }
 
+/** Where the backend lives. Empty means same origin: Vite's proxy in dev, or FastAPI
+ *  serving `dist`. Set VITE_API_BASE when the API is on another host. */
+export const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/+$/, '')
+
+/** A read-only deploy answers from the static snapshot that
+ *  backend/scripts/export_static.py writes, and never runs Sybil. */
+export const READ_ONLY = import.meta.env.VITE_READ_ONLY === '1'
+
+export const OFFLINE_MESSAGE =
+  'Running Sybil is switched off on this site for now. It shows results that were already computed.'
+
 async function get<T>(path: string): Promise<T> {
-  return parse<T>(await fetch(path))
+  return parse<T>(await fetch(API_BASE + path))
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
   return parse<T>(
-    await fetch(path, {
+    await fetch(API_BASE + path, {
       method: 'POST',
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -287,6 +298,9 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
 
 async function parse<T>(response: Response): Promise<T> {
   if (!response.ok) {
+    if (READ_ONLY && response.status === 404) {
+      throw new ApiError('Not part of this read-only version of the site.', 404)
+    }
     let detail = response.statusText
     try {
       detail = (await response.json()).detail ?? detail
@@ -298,7 +312,135 @@ async function parse<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>
 }
 
-export const api = {
+// --- read-only snapshot ---------------------------------------------------------
+
+/** The snapshot keeps the answer to `/api/x` (or `/api/x?blind=true`) at this path. */
+function snap<T>(path: string, blind = false): Promise<T> {
+  return get<T>(`${path}/index${blind ? '.blind' : ''}.json`)
+}
+
+let preparedIds: Promise<string[]> | null = null
+
+function prepared(): Promise<string[]> {
+  preparedIds ??= get<{ patient_ids: string[] }>('/api/patients/index.json').then(
+    (body) => body.patient_ids,
+    (error) => {
+      preparedIds = null
+      throw error
+    },
+  )
+  return preparedIds
+}
+
+const SORTS: Record<string, (p: ParticipantSummary) => number | string | null> = {
+  id: (p) => p.nlst_pid,
+  age: (p) => p.age_at_randomization,
+  rounds: (p) => -p.n_rounds,
+  results: (p) => -p.results_ready,
+  dx: (p) => p.outcome?.years_rand_to_dx ?? null,
+}
+
+function countBy(values: (string | null)[]): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const value of values) if (value != null) out[value] = (out[value] ?? 0) + 1
+  return out
+}
+
+/** What `GET /api/participants` does on the server, over the snapshot's participants. */
+async function searchSnapshot(query: SearchQuery): Promise<ParticipantPage> {
+  const blind = query.blind === true || query.blind === 'true'
+  const { items: everyone } = await get<{ items: ParticipantSummary[] }>(
+    `/api/participants/index${blind ? '.blind' : ''}.json`,
+  )
+  const text = (key: string) => (query[key] == null || query[key] === '' ? null : String(query[key]))
+  const num = (key: string) => (text(key) == null ? null : Number(text(key)))
+
+  const q = text('q')?.trim()
+  const hits = everyone.filter((p) => {
+    if (q && !p.nlst_pid.startsWith(q)) return false
+    if (text('sex') && p.sex !== text('sex')) return false
+    if (text('smoking') && p.smoking_status !== text('smoking')) return false
+    if (text('race') && p.race !== text('race')) return false
+    const age = p.age_at_randomization
+    if (num('age_min') != null && (age == null || age < num('age_min')!)) return false
+    if (num('age_max') != null && (age == null || age > num('age_max')!)) return false
+    if (num('rounds_min') != null && p.n_rounds < num('rounds_min')!) return false
+    if (text('manufacturer') && !p.manufacturers.includes(text('manufacturer')!)) return false
+    if (text('diagnosed') != null && !blind
+        && (p.outcome?.diagnosed ?? false) !== (text('diagnosed') === 'true')) return false
+    // everyone in the snapshot has a result
+    if (text('has_results') === 'false') return false
+    return true
+  })
+
+  const sort = text('sort') ?? 'id'
+  const keyOf = SORTS[sort.replace(/^-/, '')] ?? SORTS.id
+  const flip = sort.startsWith('-') ? -1 : 1
+  hits.sort((a, b) => {
+    const x = keyOf(a)
+    const y = keyOf(b)
+    if (x !== y) {
+      if (x == null) return 1 // missing values last, either direction
+      if (y == null) return -1
+      return (x < y ? -1 : 1) * flip
+    }
+    return a.nlst_pid < b.nlst_pid ? -1 : 1
+  })
+
+  const pageSize = Math.max(1, Math.min(num('page_size') ?? 25, 100))
+  const page = Math.max(1, num('page') ?? 1)
+  const ages = everyone.map((p) => p.age_at_randomization).filter((a): a is number => a != null)
+  const facets: Facets = {
+    sex: countBy(everyone.map((p) => p.sex)),
+    smoking: countBy(everyone.map((p) => p.smoking_status)),
+    race: countBy(everyone.map((p) => p.race)),
+    manufacturer: countBy(everyone.flatMap((p) => p.manufacturers)),
+    rounds: countBy(everyone.map((p) => String(p.n_rounds))),
+    age: [Math.min(...ages), Math.max(...ages)],
+    with_results: everyone.length,
+  }
+  if (!blind) facets.diagnosed = everyone.filter((p) => p.outcome?.diagnosed).length
+  return {
+    total: hits.length,
+    page,
+    page_size: pageSize,
+    blind,
+    items: hits.slice((page - 1) * pageSize, page * pageSize),
+    facets,
+  }
+}
+
+const readOnlyApi = {
+  health: () => snap<Health>('/api/health'),
+  randomPatient: async (_mode: 'curated' | 'live', exclude?: string) => {
+    const ids = (await prepared()).filter((id) => id !== exclude)
+    const id = ids[Math.floor(Math.random() * ids.length)]
+    return { ...(await snap<PersonCard>(`/api/patients/${id}`)), mode: 'curated' as const }
+  },
+  patient: (id: string) => snap<PersonCard>(`/api/patients/${id}`),
+  result: (id: string) => snap<RiskResult>(`/api/patients/${id}/result`),
+  outcome: (id: string) => snap<Outcome>(`/api/patients/${id}/outcome`),
+  cohort: () => snap<Cohort>('/api/cohort'),
+  /** Prepared people replay their cached run, exactly as the live backend does. */
+  run: async (id: string): Promise<RunStarted> => {
+    if (!(await prepared()).includes(id)) throw new ApiError(OFFLINE_MESSAGE, 503)
+    return { job_id: null, patient_id: id, ready: true, state: 'done' }
+  },
+  searchParticipants: searchSnapshot,
+  participant: (pid: string, blind: boolean) =>
+    snap<ParticipantDetail>(`/api/participants/${pid}`, blind),
+  runParticipant: async (_pid: string, _examIds: string[]): Promise<{ nlst_pid: string; runs: RoundRun[] }> => {
+    throw new ApiError(OFFLINE_MESSAGE, 503)
+  },
+  participantResults: (pid: string, blind: boolean) =>
+    snap<ParticipantResults>(`/api/participants/${pid}/results`, blind),
+  exportUrl: (pid: string, blind: boolean) =>
+    `${API_BASE}/api/participants/${pid}/export${blind ? '.blind' : ''}.csv`,
+}
+
+// --- the API --------------------------------------------------------------------
+
+const liveApi = {
   health: () => get<Health>('/api/health'),
   randomPatient: (mode: 'curated' | 'live', exclude?: string) =>
     get<PersonCard>(`/api/patients/random?mode=${mode}${exclude ? `&exclude=${exclude}` : ''}`),
@@ -320,10 +462,15 @@ export const api = {
       `/api/participants/${pid}/results${queryString({ blind: blind || null })}`,
     ),
   exportUrl: (pid: string, blind: boolean) =>
-    `/api/participants/${pid}/export.csv${queryString({ blind: blind || null })}`,
+    `${API_BASE}/api/participants/${pid}/export.csv${queryString({ blind: blind || null })}`,
+}
+
+export const api = {
+  ...(READ_ONLY ? readOnlyApi : liveApi),
+  // images keep their URL paths in the snapshot, so these are the same either way
   sliceUrl: (id: string, index: number) =>
-    `/api/patients/${id}/slices/${String(index).padStart(3, '0')}.webp`,
+    `${API_BASE}/api/patients/${id}/slices/${String(index).padStart(3, '0')}.webp`,
   overlayUrl: (id: string, index: number) =>
-    `/api/patients/${id}/overlay/${String(index).padStart(3, '0')}.webp`,
-  coronalUrl: (id: string) => `/api/patients/${id}/coronal.webp`,
+    `${API_BASE}/api/patients/${id}/overlay/${String(index).padStart(3, '0')}.webp`,
+  coronalUrl: (id: string) => `${API_BASE}/api/patients/${id}/coronal.webp`,
 }

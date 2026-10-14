@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Switch } from '@/components/ui/switch'
-import type { PersonCard } from '@/lib/api'
+import { READ_ONLY, type PersonCard } from '@/lib/api'
 import { Dices, FileDown, Lock, Users } from 'lucide-react'
 
 type Props = {
@@ -59,15 +59,17 @@ export function PersonSection({
             Use the offline demo scan
           </Button>
         )}
-        <div className="flex items-center gap-2">
-          <Switch id="live-mode" checked={liveMode} onCheckedChange={onLiveModeChange} />
-          <Label htmlFor="live-mode" className="text-sm">
-            Live mode
-            <span className="block text-xs text-muted-foreground">
-              downloads a brand-new scan and runs it; takes a few minutes
-            </span>
-          </Label>
-        </div>
+        {!READ_ONLY && (
+          <div className="flex items-center gap-2">
+            <Switch id="live-mode" checked={liveMode} onCheckedChange={onLiveModeChange} />
+            <Label htmlFor="live-mode" className="text-sm">
+              Live mode
+              <span className="block text-xs text-muted-foreground">
+                downloads a brand-new scan and runs it; takes a few minutes
+              </span>
+            </Label>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">

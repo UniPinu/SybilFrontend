@@ -1,25 +1,31 @@
 import { ExploreView } from '@/components/explore/ExploreView'
 import { SiteFooter } from '@/components/SiteFooter'
 import { StoryView } from '@/components/StoryView'
+import { VisualiserView } from '@/components/visualiser/VisualiserView'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { goTo, useSearchParams } from '@/lib/url'
 import { useQuery } from '@tanstack/react-query'
 import { Activity } from 'lucide-react'
 
-const STORY_SECTIONS = [
-  ['person', 'Person'],
-  ['scan', 'Scan'],
-  ['run', 'Run'],
-  ['prediction', 'Prediction'],
+const HOME_SECTIONS = [
+  ['align', 'Method'],
+  ['question', 'Question'],
+  ['person', 'Try it'],
   ['scoreboard', 'Scoreboard'],
-  ['about', 'About'],
 ] as const
 
-/** Two views share one shell: the guided story (`?p=`) and Explore (`?view=explore`). */
+const VIEWS = [
+  { view: null, label: 'Homepage' },
+  { view: 'explore', label: 'Explore' },
+  { view: 'visualiser', label: 'Visualiser' },
+] as const
+
+/** Three views share one shell: the homepage (research + `?p=` story), Explore and the Visualiser. */
 export default function App() {
   const params = useSearchParams()
-  const explore = params.get('view') === 'explore'
+  const view = params.get('view')
+  const home = view !== 'explore' && view !== 'visualiser'
 
   return (
     <div className="min-h-dvh bg-background">
@@ -34,31 +40,43 @@ export default function App() {
             }}
           >
             <Activity className="size-5" aria-hidden />
-            Sybil Explorer
+            CTscannr
           </a>
           <nav className="flex items-center gap-1" aria-label="Main">
-            {!explore &&
-              STORY_SECTIONS.map(([id, label]) => (
+            {home &&
+              HOME_SECTIONS.map(([id, label]) => (
                 <Button key={id} variant="ghost" size="sm" asChild className="hidden lg:inline-flex">
                   <a href={`#${id}`}>{label}</a>
                 </Button>
               ))}
             <div className="ml-2 flex rounded-lg border p-0.5">
-              <Button variant={explore ? 'ghost' : 'secondary'} size="sm"
-                aria-current={!explore ? 'page' : undefined} onClick={() => goTo({})}>
-                Story
-              </Button>
-              <Button variant={explore ? 'secondary' : 'ghost'} size="sm"
-                aria-current={explore ? 'page' : undefined} onClick={() => goTo({ view: 'explore' })}>
-                Explore
-              </Button>
+              {VIEWS.map((v) => {
+                const active = (v.view ?? null) === (home ? null : view)
+                return (
+                  <Button key={v.label} variant={active ? 'secondary' : 'ghost'} size="sm"
+                    aria-current={active ? 'page' : undefined}
+                    onClick={() => goTo(v.view ? { view: v.view } : {})}>
+                    {v.label}
+                  </Button>
+                )
+              })}
             </div>
           </nav>
         </div>
       </header>
 
-      {explore ? <ExploreShell /> : <StoryView />}
+      {view === 'explore' ? <ExploreShell /> : view === 'visualiser' ? <VisualiserShell /> : <StoryView />}
     </div>
+  )
+}
+
+function VisualiserShell() {
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 20_000 })
+  return (
+    <main className="mx-auto max-w-7xl space-y-16 px-4 pb-10">
+      <VisualiserView />
+      <SiteFooter health={health.data} />
+    </main>
   )
 }
 

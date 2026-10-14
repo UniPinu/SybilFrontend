@@ -1,5 +1,5 @@
 import { Separator } from '@/components/ui/separator'
-import type { Health } from '@/lib/api'
+import { READ_ONLY, type Health } from '@/lib/api'
 
 export function SiteFooter({ health }: { health: Health | undefined }) {
   return (
@@ -35,8 +35,16 @@ export function SiteFooter({ health }: { health: Health | undefined }) {
           </p>
         </div>
         <div className="space-y-2">
-          <p className="font-medium text-foreground">This machine</p>
-          {health ? (
+          <p className="font-medium text-foreground">
+            {READ_ONLY ? 'Where these results come from' : 'This machine'}
+          </p>
+          {READ_ONLY ? (
+            <ul className="space-y-1">
+              <li>model: {health?.model_name ?? 'sybil_ensemble'}, run ahead of time</li>
+              <li>people with results: {health?.cache.patients_ready ?? '-'}</li>
+              <li>running new scans: switched off for now</li>
+            </ul>
+          ) : health ? (
             <ul className="space-y-1">
               <li>
                 model: {health.model_name} on {health.device} ({health.threads} threads)

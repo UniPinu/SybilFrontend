@@ -1,4 +1,4 @@
-# Sybil Explorer — frontend
+# CTscannr — frontend
 
 Vite + React + TypeScript + Tailwind v4 + shadcn/ui (radix). The whole demo is one scrolling page;
 see [../README.md](../README.md) for setup and [../MVP.md](../MVP.md) section 7 for the design brief.

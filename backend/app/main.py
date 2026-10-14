@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Sybil Explorer",
+    title="CTscannr",
     summary="Runs the real Sybil model on one de-identified NLST chest CT at a time.",
     lifespan=lifespan,
 )

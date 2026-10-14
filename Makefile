@@ -1,4 +1,4 @@
-.PHONY: help check setup weights candidates pool dev dev-backend dev-frontend build test test-fast test-slow lint clean clean-cache
+.PHONY: help check setup weights candidates pool dev dev-backend dev-frontend build test test-fast test-slow lint clean clean-cache static upload-static visualiser
 
 BACKEND := backend
 FRONTEND := frontend
@@ -17,6 +17,9 @@ help:
 	@echo "test-slow   the real-ensemble tests (several minutes)"
 	@echo "lint        lint the frontend"
 	@echo "clean-cache drop processed patients (keeps the model weights)"
+	@echo "visualiser  record one real run step by step for the Visualiser page (~25 min)"
+	@echo "static      snapshot cached results into backend/static_export (read-only deploy)"
+	@echo "upload-static  sync that snapshot to R2 with rclone (R2_BUCKET=..., RCLONE_REMOTE=r2)"
 
 # Fail early, with a useful message, instead of deep inside uv or pnpm.
 check:
@@ -64,6 +67,27 @@ test-slow:
 
 lint:
 	cd $(FRONTEND) && pnpm lint
+
+# Downloads one scan, runs the ensemble with hooks, writes frontend/public/visualiser/<case>/.
+CASE ?= 217203_T2
+visualiser:
+	cd $(BACKEND) && uv run python scripts/capture_visualiser.py --case $(CASE)
+
+# --- read-only deploy: cached results as static files (see README) ----------
+RCLONE_REMOTE ?= r2
+R2_BUCKET ?=
+
+static:
+	cd $(BACKEND) && uv run python scripts/export_static.py
+
+# Images never change once rendered; JSON may be re-exported, so keep it short-lived.
+upload-static:
+	@test -n "$(R2_BUCKET)" || { echo "Set R2_BUCKET, e.g. make upload-static R2_BUCKET=sybil-results"; exit 1; }
+	@command -v rclone >/dev/null || { echo "rclone not found. macOS: brew install rclone"; exit 1; }
+	rclone copy $(BACKEND)/static_export $(RCLONE_REMOTE):$(R2_BUCKET) --include "*.webp" \
+		--header-upload "Cache-Control: public, max-age=31536000, immutable" --transfers 32 --progress
+	rclone copy $(BACKEND)/static_export $(RCLONE_REMOTE):$(R2_BUCKET) --exclude "*.webp" \
+		--header-upload "Cache-Control: public, max-age=300" --transfers 32 --progress
 
 clean-cache:
 	cd $(BACKEND) && uv run python -c "import shutil; from app.config import settings; shutil.rmtree(settings.cache_dir, ignore_errors=True); print('cache cleared')"

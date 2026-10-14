@@ -7,7 +7,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
-import { api, ApiError, type RoundDetail } from '@/lib/api'
+import { api, ApiError, READ_ONLY, type RoundDetail } from '@/lib/api'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Loader2, Play } from 'lucide-react'
 import { useCallback, useMemo, useState } from 'react'
@@ -22,7 +22,7 @@ type Props = {
 
 /** Runnable, not cached, not already on its way. */
 function canQueue(round: RoundDetail, jobs: Record<string, string>): boolean {
-  return round.runnable && !round.ready && !!round.exam_id && !jobs[round.exam_id]
+  return !READ_ONLY && round.runnable && !round.ready && !!round.exam_id && !jobs[round.exam_id]
 }
 
 export function ParticipantView({ pid, blind, onBack, onOpenStory }: Props) {
@@ -181,11 +181,14 @@ export function ParticipantView({ pid, blind, onBack, onOpenStory }: Props) {
           <div className="space-y-1">
             <h2 id="rounds-heading" className="text-2xl font-semibold">Screening rounds</h2>
             <p className="max-w-2xl text-muted-foreground">
-              NLST offered up to three yearly scans. Choose which ones Sybil should read. One scan
-              runs at a time, about a minute and a half each.
+              {READ_ONLY
+                ? `NLST offered up to three yearly scans. Rounds marked Run have been through Sybil;
+                   running the others is switched off on this site for now.`
+                : `NLST offered up to three yearly scans. Choose which ones Sybil should read. One
+                   scan runs at a time, about a minute and a half each.`}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
+          {!READ_ONLY && <div className="flex flex-wrap items-center gap-3">
             {chosen.length > 0 && (
               <span className="text-sm text-muted-foreground">{estimateMinutes(chosen.length)}</span>
             )}
@@ -194,7 +197,7 @@ export function ParticipantView({ pid, blind, onBack, onOpenStory }: Props) {
               {run.isPending ? <Loader2 className="size-5 animate-spin" aria-hidden /> : <Play className="size-5" aria-hidden />}
               {chosen.length > 1 ? `Run ${chosen.length} rounds` : chosen.length === 1 ? `Run ${chosen[0].round}` : 'Run Sybil'}
             </Button>
-          </div>
+          </div>}
         </div>
 
         <div className="grid gap-4 md:grid-cols-3">
