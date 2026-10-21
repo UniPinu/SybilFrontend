@@ -75,6 +75,19 @@ class Settings:
     # transparent, which keeps the overlay WebPs small and the picture readable.
     overlay_floor: float = float(os.environ.get("OVERLAY_FLOOR", "0.12"))
 
+    # --- api -------------------------------------------------------------
+    # Comma-separated origins allowed to call the API from another site, e.g. a
+    # Vercel frontend. Not needed when the backend serves frontend/dist itself.
+    cors_origins: list[str] = field(
+        default_factory=lambda: [
+            o.strip()
+            for o in os.environ.get(
+                "CORS_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"
+            ).split(",")
+            if o.strip()
+        ]
+    )
+
     @property
     def candidates_path(self) -> Path:
         return self.data_dir / self.candidates_file

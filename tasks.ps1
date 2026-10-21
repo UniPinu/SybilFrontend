@@ -10,12 +10,13 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('help', 'setup', 'weights', 'candidates', 'pool', 'dev', 'build', 'test',
-                 'test-fast', 'test-slow', 'lint', 'clean-cache')]
+    [ValidateSet('help', 'setup', 'weights', 'candidates', 'pool', 'dev', 'build', 'serve',
+                 'test', 'test-fast', 'test-slow', 'lint', 'clean-cache')]
     [string]$Task = 'help',
 
     [int]$Pool = 16,
-    [int]$Reference = 12
+    [int]$Reference = 12,
+    [int]$Port = 8000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,7 +38,8 @@ candidates   build data/candidates.parquet from the IDC index (no scans download
 pool         prepare the curated pool + reference sample (-Pool 16 -Reference 12)
 dev          run uvicorn :8000 and vite :5173 together
 build        build the frontend into frontend/dist (the backend serves it)
-test         smoke test + unit tests
+serve        build, then serve app + API on 0.0.0.0:8000 for the network (-Port 8000)
+test        smoke test + unit tests
 test-fast    unit tests only (no model, no network)
 test-slow    the real-ensemble tests (several minutes)
 lint         lint the frontend
@@ -75,6 +77,12 @@ clean-cache  drop processed patients (keeps the ~700 MB of model weights)
     }
 
     'build' { Invoke-In $frontend { pnpm build } }
+
+    # One worker only: the job queue and the loaded ensemble live in this process.
+    'serve' {
+        Invoke-In $frontend { pnpm build }
+        Invoke-In $backend { uv run uvicorn app.main:app --host 0.0.0.0 --port $Port }
+    }
 
     'test' {
         Invoke-In $backend {
