@@ -15,6 +15,10 @@ dependencies = [
   "pandas>=2.0",
   "pyarrow>=15",
   "pillow>=10.2.0",
+  # Sybil's own pins, repeated here only so [tool.uv.sources] can send Windows to
+  # the CUDA build (sources apply to direct dependencies only).
+  "torch==1.13.1",
+  "torchvision==0.14.1",
 ]
 
 [build-system]
@@ -56,3 +60,15 @@ environments = [
   "sys_platform == 'darwin' and platform_machine == 'arm64'",
   "sys_platform == 'win32' and platform_machine == 'AMD64'",
 ]
+
+# Windows gets torch 1.13.1+cu117 (still satisfies Sybil's `torch==1.13.1`), so the
+# RTX 4080 can run scripts/harvest.py. It also runs on CPU if CUDA is unavailable.
+# CUDA 11.7 has no sm_89 kernels, but sm_86 binaries run on Ada; driver >= 516 needed.
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu117", marker = "sys_platform == 'win32'" }]
+torchvision = [{ index = "pytorch-cu117", marker = "sys_platform == 'win32'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu117"
+url = "https://download.pytorch.org/whl/cu117"
+explicit = true

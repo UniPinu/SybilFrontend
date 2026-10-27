@@ -282,6 +282,21 @@ export type TrajectoryGuide = {
     curve_mae_pp: number
     persistence_mae_pp: number
   }
+  /** T0 -> T1 offset carried forward to T2, on each scan's own clock. Absent in older snapshots. */
+  development?: {
+    /** years from T1 to T2 */
+    t1_gap: number
+    t0_coef: number[]
+    t1_coef: number[]
+    /** both degree-5 polynomials, t = years after their own scan */
+    polys: { t: number; t0: number; t1: number }[]
+    t0_aligned: number[]
+    offset: number[]
+    t1_slid: number[]
+    forecast: number[]
+    mae_pp: number
+    slid_mae_pp: number
+  }
   network: { inputs: { name: string; value: number; x: number }[]; hidden: number; outputs: string[] }
   dataset: {
     file: string

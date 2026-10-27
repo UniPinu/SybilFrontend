@@ -9,8 +9,8 @@ finishes, so the numbers survive cache eviction and the script resumes where it
 stopped. Participants already fully cached are used first, for free.
 
 Cost: three scans per participant at ~1.5 min each on a 16-thread CPU, i.e.
-about 4.5 min per participant -- 100 participants is an overnight job, which is
-what the university PC is for.
+about 4.5 min per participant -- 100 participants is an overnight job. For
+everyone, on the GPU, use scripts/harvest.py instead.
 """
 from __future__ import annotations
 
@@ -24,36 +24,14 @@ from typing import List
 
 import pandas as pd
 
-from app import participants as people
 from app.config import settings
-from app.data import exams
+from app.harvest import eligible
 from app.pipeline import PipelineError, process_patient
 from app.store import store
 from app.trajectory import CSV_COLUMNS, ROUNDS, risk_columns
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("build_trajectories")
-
-
-def eligible() -> pd.DataFrame:
-    """Participants with an eligible exam in every round and a date for each.
-
-    Indexed by nlst_pid, with one exam id column per round (`exam_t0` ..).
-    """
-    df = exams()
-    if df is None:
-        raise SystemExit("data/exams.parquet is missing -- run scripts/build_candidates.py")
-    ok = df[df["eligible"] & df["study_yr"].isin(ROUNDS)]
-    wide = ok.pivot_table(index="nlst_pid", columns="study_yr", values="patient_id",
-                          aggfunc="first").dropna()
-    wide.columns = [f"exam_t{int(c)}" for c in wide.columns]
-    prsn = people.table()
-    year_cols = [f"t{r}_years" for r in ROUNDS]
-    joined = wide.join(prsn[year_cols + ["diagnosed", "years_rand_to_dx",
-                                         "cancer_within_6y_any"]], how="inner")
-    joined = joined.dropna(subset=year_cols)
-    # the curve needs T1 strictly after T0
-    return joined[joined["t1_years"] > joined["t0_years"]]
 
 
 def plan(pool: pd.DataFrame, n: int, seed: int, cancer_share: float, done: set) -> List[str]:

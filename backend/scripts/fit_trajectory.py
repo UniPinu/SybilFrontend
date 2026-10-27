@@ -26,7 +26,8 @@ import numpy as np
 from app.config import settings
 from app.trajectory import (YEARS, Trajectories, abs_errors, combined_curve, cross_validate,
                             curve_baseline, curve_forecast, default_specs, load_trajectories,
-                            metrics, paired_difference, persistence)
+                            metrics, paired_difference, persistence,
+                            development_baseline)
 
 
 def synthetic(n: int, seed: int = 0) -> Trajectories:
@@ -95,7 +96,9 @@ def main() -> int:
 
     truth = traj.risks[:, 2]
     preds = {"T2 = T1 (no model)": persistence(traj),
-             "T0+T1 curve (no model)": curve_baseline(traj)}
+             "T0+T1 curve (no model)": curve_baseline(traj),
+             "T1 slid to T2 (no model)": development_baseline(traj, with_offset=False),
+             "T1 slid + T0->T1 offset (no model)": development_baseline(traj)}
     specs = default_specs(args.hidden, args.epochs)
     try:
         preds.update(cross_validate(traj, specs, folds=args.folds, repeats=args.repeats,
@@ -115,6 +118,7 @@ def main() -> int:
     errors = {name: abs_errors(p, truth) for name, p in preds.items()}
     learned = list(specs)  # default_specs lists each model without, then with, the offset
     pairs = list(zip(learned[1::2], learned[0::2]))
+    pairs.append(("T1 slid + T0->T1 offset (no model)", "T1 slid to T2 (no model)"))
     pairs += [(name, "T2 = T1 (no model)") for name in list(preds)[1:]]
     print("\npaired differences, MAE(a) - MAE(b) per participant, 95% bootstrap CI "
           "(negative = a is better)")

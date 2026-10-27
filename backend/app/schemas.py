@@ -224,5 +224,6 @@ class TrajectoryGuide(BaseModel):
     align: Dict[str, Any]
     curve: List[Dict[str, Any]]
     forecast: Dict[str, Any]
+    development: Dict[str, Any]
     network: Dict[str, Any]
     dataset: Dict[str, Any]

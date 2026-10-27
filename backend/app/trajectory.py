@@ -121,6 +121,41 @@ def blend_weight(t: np.ndarray, offset: float) -> np.ndarray:
     return np.clip((np.asarray(t, dtype=float) - offset) / (YEARS - offset), 0.0, 1.0)
 
 
+def scan_polynomial(risks: Sequence[float], degree: int = YEARS - 1) -> np.ndarray:
+    """Coefficients (highest power first) of a polynomial through one scan's points (k, risk_k), k = 1..6.
+
+    At the default degree 5 it passes exactly through all six points.
+    """
+    return np.polyfit(np.arange(1, YEARS + 1, dtype=float), np.asarray(risks, dtype=float), degree)
+
+
+@dataclass
+class Development:
+    """T0 -> T1 carried forward to T2, everything on the newer scan's own clock (k = 1..6)."""
+    t0_coef: np.ndarray
+    t1_coef: np.ndarray
+    t0_aligned: np.ndarray  # P0(k + d01): T0 read at the same moments T1 reports on
+    offset: np.ndarray      # r1(k) - P0(k + d01): how much T1 moved away from T0
+    t1_slid: np.ndarray     # P1(k + d12): T1 read at the same moments T2 reports on
+    forecast: np.ndarray    # P1(k + d12) + offset, clipped to [0, 1]
+
+
+def development_forecast(r0: Sequence[float], r1: Sequence[float], d01: float, d12: float,
+                         degree: int = YEARS - 1) -> Development:
+    """Predict T2 by assuming T1 -> T2 changes the way T0 -> T1 did.
+
+    With d01 = 1 exactly, T0's 2-year point lines up with T1's 1-year point,
+    and so on; the polynomials handle gaps that are not whole years. Note that
+    P(k + d) for k = 6 reaches past the last point, i.e. the polynomial extrapolates.
+    """
+    k = np.arange(1, YEARS + 1, dtype=float)
+    p0, p1 = scan_polynomial(r0, degree), scan_polynomial(r1, degree)
+    t0_aligned = np.polyval(p0, k + d01)
+    offset = np.asarray(r1, dtype=float) - t0_aligned
+    t1_slid = np.polyval(p1, k + d12)
+    return Development(p0, p1, t0_aligned, offset, t1_slid, np.clip(t1_slid + offset, 0.0, 1.0))
+
+
 def curve_forecast(curve: RiskCurve, at: float) -> np.ndarray:
     """What a scan taken `at` years after T0 should report, read off the curve."""
     if at + YEARS > curve.grid[-1]:
@@ -305,6 +340,13 @@ def curve_baseline(traj: Trajectories) -> np.ndarray:
         curve_forecast(combined_curve(r[0], r[1], d1, horizon=horizon), d2)
         for r, d1, d2 in zip(traj.risks, traj.offsets, traj.t2_offsets)
     ])
+
+
+def development_baseline(traj: Trajectories, *, with_offset: bool = True) -> np.ndarray:
+    """Baseline: T1 slid on to T2's date, plus (or without) the T0 -> T1 offset."""
+    d12 = traj.years[:, 2] - traj.years[:, 1]
+    out = [development_forecast(r[0], r[1], d01, d) for r, d01, d in zip(traj.risks, traj.offsets, d12)]
+    return np.array([np.clip(f.t1_slid, 0, 1) if not with_offset else f.forecast for f in out])
 
 
 def cross_validate(traj: Trajectories, specs: Dict[str, Spec], *, folds: int = 5,

@@ -11,6 +11,9 @@ backend/cache/
 # built by scripts/build_candidates.py (6 MB, rebuild in seconds)
 backend/data/*.parquet
 
+# scripts/harvest.py output: ~25 KB per scan, ~1.5 GB for everyone
+backend/data/harvest/
+
 # node / vite
 node_modules/
 dist/

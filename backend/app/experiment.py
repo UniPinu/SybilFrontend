@@ -7,6 +7,7 @@ scripts/fit_trajectory.py can never disagree. Steps:
   align     T0's and T1's points on T0's clock (T1 made unconditional)
   curve     the PCHIP curves and the blend between them, sampled densely
   forecast  T2's six numbers read off the curve, vs Sybil's T2 and "T2 = T1"
+  development  degree-5 polynomial per scan; T2 = T1 slid on + the T0 -> T1 offset
   network   the 13 inputs for this person, as the models see them
   dataset   how far data/trajectories.csv is, and cross-validated results once
             there are enough participants
@@ -24,7 +25,8 @@ from app.config import settings
 from app.store import store
 from app.trajectory import (YEARS, Trajectories, abs_errors, blend_weight, combined_curve,
                             cross_validate, curve_forecast, curve_parts, default_specs,
-                            load_trajectories, logit, metrics, paired_difference)
+                            load_trajectories, logit, metrics, paired_difference,
+                            development_forecast)
 
 MIN_PARTICIPANTS = 10  # 5-fold CV needs two people per fold
 HIDDEN = 8
@@ -88,6 +90,7 @@ def build_guide(nlst_pid: str, years: np.ndarray, risks: np.ndarray,
             "curve_mae_pp": round(float(np.abs(forecast - truth).mean() * 100), 3),
             "persistence_mae_pp": round(float(np.abs(risks[1] - truth).mean() * 100), 3),
         },
+        "development": _development(risks, d1, d2 - d1),
         "network": {
             "inputs": [{"name": f"T{r} · {y} y", "value": round(float(risks[r][y - 1]), 6),
                         "x": round(float(X[r * YEARS + y - 1]), 4)}
@@ -96,6 +99,26 @@ def build_guide(nlst_pid: str, years: np.ndarray, risks: np.ndarray,
             "hidden": HIDDEN,
             "outputs": [f"T2 · {y} y" for y in k],
         },
+    }
+
+
+def _development(risks: np.ndarray, d01: float, d12: float) -> Dict[str, Any]:
+    """T0 and T1 as degree-5 polynomials, lined up; their gap is added onto T1 slid on to T2."""
+    dev = development_forecast(risks[0], risks[1], d01, d12)
+    truth = risks[2]
+    t = np.round(np.arange(0.0, YEARS + 1 + 1e-9, 0.05), 2)  # each scan's own clock, a year past its last point
+    return {
+        "t1_gap": round(d12, 3),
+        "t0_coef": _r(dev.t0_coef, 8),
+        "t1_coef": _r(dev.t1_coef, 8),
+        "polys": [{"t": float(x), "t0": round(float(np.polyval(dev.t0_coef, x)), 6),
+                   "t1": round(float(np.polyval(dev.t1_coef, x)), 6)} for x in t],
+        "t0_aligned": _r(dev.t0_aligned),
+        "offset": _r(dev.offset),
+        "t1_slid": _r(dev.t1_slid),
+        "forecast": _r(dev.forecast),
+        "mae_pp": round(float(np.abs(dev.forecast - truth).mean() * 100), 3),
+        "slid_mae_pp": round(float(np.abs(np.clip(dev.t1_slid, 0, 1) - truth).mean() * 100), 3),
     }
 
 

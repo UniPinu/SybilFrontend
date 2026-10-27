@@ -246,12 +246,15 @@ environments = [
 
 Linux or an Intel Mac needs `tool.uv.override-dependencies` plus the PyTorch cu117 index.
 
-**CPU only.** The PyPI `torch==1.13.1` Windows wheel is CPU-only. There is an RTX 4090 in this machine,
-but torch 1.13's cu117 build predates sm_89 and would not run on it, so CUDA is not an option without
-moving off the pinned torch. MVP.md's MPS experiment (section 6.7) is macOS-only and was not attempted, so Macs run on the CPU
-too (`SYBIL_DEVICE=mps` will try it, but scores are only checked on the CPU). Inference time
-depends on the core count: `SYBIL_THREADS` defaults to the number of cores, up to 16.
-CPU is fast enough: ~80 s for the full ensemble.
+**GPU on Windows, CPU on Macs.** On Windows, `pyproject.toml` sends `torch`/`torchvision` to the
+PyTorch cu117 index, so `uv sync` installs `torch 1.13.1+cu117` (still Sybil's pinned version). CUDA 11.7
+has no sm_89 kernels, but NVIDIA binaries are compatible within a major architecture, so its sm_86
+kernels run on an RTX 40-series card (driver 516 or newer). Check with `.\tasks.ps1 gpu-check`. The app
+itself still defaults to `SYBIL_DEVICE=cpu`, the configuration its scores were verified on; the bulk
+harvest below uses the GPU and checks it against upstream's published demo scores before it starts.
+MVP.md's MPS experiment (section 6.7) was not attempted, so Macs run on the CPU. Inference time on the
+CPU depends on the core count: `SYBIL_THREADS` defaults to the number of cores, up to 16, which gives
+~80 s for the full ensemble.
 
 ---
 
@@ -364,7 +367,7 @@ T1's six numbers and the T0 → T1 offset (13 inputs) predict Sybil's six T2 num
 ```bash
 cd backend
 uv run python scripts/build_trajectories.py --n 100 --dry-run   # plan + time estimate
-uv run python scripts/build_trajectories.py --n 100             # ~4.5 min per participant; resumable
+uv run python scripts/build_trajectories.py --n 100             # ~4.5 min per participant on CPU; resumable
 uv run python scripts/fit_trajectory.py                         # the comparison table
 uv run python scripts/fit_trajectory.py --show 217203           # one participant's curve
 uv run python scripts/fit_trajectory.py --synthetic 200         # pipeline check, no Sybil needed
@@ -373,6 +376,50 @@ uv run python scripts/fit_trajectory.py --synthetic 200         # pipeline check
 Results go to `backend/data/trajectories.csv`, one row per participant, written as each
 participant finishes. `--cancer-share 0.3` enriches the sample with people diagnosed within six
 years (about 2% of the population), which gives the models more spread to learn from.
+
+### Everyone, on the GPU: `scripts/harvest.py`
+
+[scripts/harvest.py](backend/scripts/harvest.py) runs Sybil on all three scans of every participant with
+three eligible rounds: 19,667 people, 59,001 scans, about 4.9 TB of downloads that are deleted as soon as
+each scan is read. On Windows:
+
+```powershell
+.\tasks.ps1 gpu-check          # torch 1.13.1+cu117, CUDA available: True
+.\tasks.ps1 harvest            # start, or resume; -Workers 4, -Limit 200 for a trial
+.\tasks.ps1 harvest-status     # from another window: progress, scans/h, days left
+.\tasks.ps1 harvest-stop       # from another window: stop after the current scan
+.\tasks.ps1 harvest-compile    # rebuild the tables (also done when a run ends)
+```
+
+- **Stopping is always safe.** Ctrl+C once (or `harvest-stop`) finishes the scan on the GPU and exits;
+  Ctrl+C twice exits at once. Every file is written under a temporary name and renamed into place, so
+  even a power cut leaves only whole scans. A second copy can't start in the same folder.
+- **Resuming** skips finished scans. Download failures are retried on the next run; scans Sybil can't
+  read are logged in `failed.jsonl` and skipped, along with the rest of that participant (`--retry-failed`
+  tries them again).
+- **Order** is a seeded shuffle, so whatever is finished when you stop is a random sample of complete
+  triples. `--cancer-first` does the 455 people diagnosed within six years (2.3%) first instead.
+- **Pipeline:** `--workers` threads download (s5cmd, straight from IDC's public S3 bucket) and prepare
+  volumes on the CPU while the main thread runs the five networks on the GPU. Downloading is the
+  bottleneck; `harvest-status` shows the measured rate.
+- **Checked first:** before starting it scores upstream's demo scan on the GPU and refuses to run if it
+  differs from the published scores by more than 0.1%. TF32 is switched off so the GPU computes in full
+  fp32, like the CPU.
+
+Output, in `backend/data/harvest/`:
+
+| File | What |
+|---|---|
+| `scans/{exam}.json` | calibrated risks, the raw (uncalibrated) mean, each of the 5 networks' raw risks, labels (`cancer_within_6y`, `years_to_cancer`, `years_followed`), scanner and series facts |
+| `features/{exam}.npz` | `hidden` (5 × 512): each network's last layer before its risk output; `attention` (25 × 16 × 16) |
+| `scans.parquet` | every scan, one row each (from `compile`) |
+| `features.npz` | complete participants: `pids`, `hidden` (n × 3 × 5 × 512), `attention` (n × 3 × 25 × 16 × 16) |
+| `../trajectories.csv` | complete participants in the format above, so `fit_trajectory.py` and the Experiment page use them |
+
+Why keep more than the six risks: the calibrated risks come from an isotonic calibrator, so they are a
+step function with many ties. The raw mean keeps the ordering inside each step, and the 512 hidden
+features per network describe the scan itself. A model predicting T2 from T0 + T1 can only learn from
+what was saved, and re-running 59k scans to get it later would take days.
 
 ---
 

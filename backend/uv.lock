@@ -670,9 +670,11 @@ dependencies = [
     { name = "pillow" },
     { name = "pydicom" },
     { name = "pylibjpeg", extra = ["all"] },
-    { name = "torch" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "sys_platform == 'win32'" },
     { name = "torchio" },
-    { name = "torchvision" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "torchvision", version = "0.14.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "sys_platform == 'win32'" },
     { name = "tqdm" },
 ]
 
@@ -688,6 +690,10 @@ dependencies = [
     { name = "pyarrow" },
     { name = "sse-starlette" },
     { name = "sybil" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "sys_platform == 'win32'" },
+    { name = "torchvision", version = "0.14.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "torchvision", version = "0.14.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "sys_platform == 'win32'" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -708,6 +714,10 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "sse-starlette", specifier = ">=2.1" },
     { name = "sybil", git = "https://github.com/reginabarzilaygroup/Sybil.git?rev=d9fc81b93c1c6239a570c1c570c1f2a2e6266a4a" },
+    { name = "torch", marker = "sys_platform != 'win32'", specifier = "==1.13.1" },
+    { name = "torch", marker = "sys_platform == 'win32'", specifier = "==1.13.1", index = "https://download.pytorch.org/whl/cu117" },
+    { name = "torchvision", marker = "sys_platform != 'win32'", specifier = "==0.14.1" },
+    { name = "torchvision", marker = "sys_platform == 'win32'", specifier = "==0.14.1", index = "https://download.pytorch.org/whl/cu117" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 provides-extras = ["dev"]
@@ -725,12 +735,28 @@ wheels = [
 name = "torch"
 version = "1.13.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
 dependencies = [
     { name = "typing-extensions" },
 ]
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/33/bd/e174e6737daba03f8eaa7c051b9971d361022eb37b86cbe5db0b08cab00e/torch-1.13.1-cp310-cp310-win_amd64.whl", hash = "sha256:98124598cdff4c287dbf50f53fb455f0c1e3a88022b39648102957f3445e9b76", size = 162597315, upload-time = "2022-12-15T20:18:11.05Z" },
     { url = "https://files.pythonhosted.org/packages/24/45/61e41ef8a84e1d6200ff10b7cb87e23e211599ab62420396a363295f973c/torch-1.13.1-cp310-none-macosx_11_0_arm64.whl", hash = "sha256:0122806b111b949d21fa1a5f9764d1fd2fcc4a47cb7f8ff914204fd4fc752ed5", size = 53188434, upload-time = "2022-12-15T20:18:56.395Z" },
+]
+
+[[package]]
+name = "torch"
+version = "1.13.1+cu117"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+resolution-markers = [
+    "platform_machine == 'AMD64' and sys_platform == 'win32'",
+]
+dependencies = [
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu117/torch-1.13.1%2Bcu117-cp310-cp310-win_amd64.whl", hash = "sha256:978239684c6ec455ad2157ff33d44fdb9dd8d3a93b9d2f4ac7aa57691e990136", upload-time = "2023-10-08T23:52:16Z" },
 ]
 
 [[package]]
@@ -745,7 +771,8 @@ dependencies = [
     { name = "numpy" },
     { name = "scipy" },
     { name = "simpleitk" },
-    { name = "torch" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" }, marker = "sys_platform == 'win32'" },
     { name = "tqdm" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/eb/b8/e68a2fe3503e56fed2f14ac0c97eb8243a6664cac39aed4372252ca0be41/torchio-0.18.74.tar.gz", hash = "sha256:42917fac300d5700249d80229435ce0b210d07370571cefd6954ce154f02969b", size = 40169716, upload-time = "2022-02-26T19:12:32.407Z" }
@@ -757,16 +784,36 @@ wheels = [
 name = "torchvision"
 version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
+resolution-markers = [
+    "platform_machine == 'arm64' and sys_platform == 'darwin'",
+]
 dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "requests" },
-    { name = "torch" },
+    { name = "torch", version = "1.13.1", source = { registry = "https://pypi.org/simple" } },
     { name = "typing-extensions" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b9/46/065c71441c0bfb34914569f3728c4ecaa0364e65ed2f3adba98d84be568e/torchvision-0.14.1-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:8d0766ea92affa7af248e327dd85f7c9cfdf51a57530b43212d4e1858548e9d7", size = 1308938, upload-time = "2022-12-15T20:19:56.493Z" },
-    { url = "https://files.pythonhosted.org/packages/b8/e0/edf3d41324c27f246abe1a4942227c6abe44fb2e62d35807178acb1355ba/torchvision-0.14.1-cp310-cp310-win_amd64.whl", hash = "sha256:13986f0c15377ff23039e1401012ccb6ecf71024ce53def27139e4eac5a57592", size = 1093215, upload-time = "2022-12-15T20:19:52.594Z" },
+]
+
+[[package]]
+name = "torchvision"
+version = "0.14.1+cu117"
+source = { registry = "https://download.pytorch.org/whl/cu117" }
+resolution-markers = [
+    "platform_machine == 'AMD64' and sys_platform == 'win32'",
+]
+dependencies = [
+    { name = "numpy" },
+    { name = "pillow" },
+    { name = "requests" },
+    { name = "torch", version = "1.13.1+cu117", source = { registry = "https://download.pytorch.org/whl/cu117" } },
+    { name = "typing-extensions" },
+]
+wheels = [
+    { url = "https://download-r2.pytorch.org/whl/cu117/torchvision-0.14.1%2Bcu117-cp310-cp310-win_amd64.whl", hash = "sha256:b39fc67e7131053d435804d7901e88528611c0832fd9f1cc26476b5a27cc5d81", upload-time = "2023-10-09T03:36:08Z" },
 ]
 
 [[package]]

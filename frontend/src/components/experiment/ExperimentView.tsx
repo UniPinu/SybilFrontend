@@ -25,6 +25,7 @@ const STEPS = [
   'Move T1 onto T0’s clock',
   'One continuous curve',
   'Read T2 off the curve',
+  'Carry the change forward',
   'The 13-input network',
   'Train and compare',
   'What one person tells us',
@@ -122,6 +123,7 @@ export function ExperimentView() {
           <StepAlign g={query.data} />
           <StepCurve g={query.data} />
           <StepForecast g={query.data} />
+          <StepDevelopment g={query.data} />
           <StepNetwork g={query.data} />
           <StepTrain g={query.data} />
           <StepFindings g={query.data} />
@@ -253,7 +255,7 @@ function StepScans({ g }: { g: TrajectoryGuide }) {
         T0 and T1 are what the models get to see; T2 is what they try to predict.</>}
       code={{ file: 'backend/scripts/build_trajectories.py', text: 'for r in (0, 1, 2):\n    risks = process_patient(f"{pid}_T{r}").risk_by_year   # 6 numbers per scan\nappend(out, row)                                        # → data/trajectories.csv' }}>
       <Panel title="When the scans were taken"
-        caption={<>The gap between the first two scans, <strong>Δ</strong>, is the 13th input of the network in step 6. It
+        caption={<>The gap between the first two scans, <strong>Δ</strong>, is the 13th input of the network in step 7. It
           is never exactly one year: here it is {g.offset.toFixed(2)} years, and T2 came {g.t2_offset.toFixed(2)} years after T0.</>}>
         <ScanTimeline guide={g} />
       </Panel>
@@ -449,11 +451,120 @@ function StepForecast({ g }: { g: TrajectoryGuide }) {
 
 // --- step 6 -------------------------------------------------------------------
 
+const DEV_COLOR = 'var(--chart-4)'
+
+function StepDevelopment({ g }: { g: TrajectoryGuide }) {
+  const d = g.development
+  if (!d) return null
+  const f = g.forecast
+  const [r0, r1] = [g.scans[0].risk_by_year, g.scans[1].risk_by_year]
+  const lineUp: Series[] = [
+    { key: 'p0', label: 'T0’s polynomial, moved back by Δ', color: ROUND_COLOR.T0, width: 1.5,
+      data: d.polys.filter((p) => p.t >= g.offset).map((p) => ({ x: p.t - g.offset, y: p.t0 * 100 })) },
+    { key: 'r0', label: 'T0’s points', color: ROUND_COLOR.T0, width: 0, dots: true,
+      data: r0.map((v, i) => ({ x: i + 1 - g.offset, y: v * 100 })) },
+    { key: 'p1', label: 'T1’s polynomial', color: ROUND_COLOR.T1, dash: ROUND_DASH.T1, width: 1.5,
+      data: d.polys.map((p) => ({ x: p.t, y: p.t1 * 100 })) },
+    { key: 'r1', label: 'T1’s points', color: ROUND_COLOR.T1, width: 0, dots: true,
+      data: r1.map((v, i) => ({ x: i + 1, y: v * 100 })) },
+  ]
+  const onT2: Series[] = [
+    { key: 'sybil', label: 'Sybil on T2 (the truth here)', color: ROUND_COLOR.T2, width: 3, dots: true,
+      data: f.sybil_t2.map((v, i) => ({ x: i + 1, y: v * 100 })) },
+    { key: 'slid', label: 'T1 slid on to T2', color: ROUND_COLOR.T1, dash: ROUND_DASH.T1, width: 1.5, dots: true,
+      data: d.t1_slid.map((v, i) => ({ x: i + 1, y: v * 100 })) },
+    { key: 'dev', label: 'T1 slid on + offset', color: DEV_COLOR, dash: '6 3', dots: true,
+      data: d.forecast.map((v, i) => ({ x: i + 1, y: v * 100 })) },
+  ]
+  const rows = [
+    ['T1 slid + offset', d.forecast, d.mae_pp],
+    ['T1 slid, no offset', d.t1_slid, d.slid_mae_pp],
+    ['T2 = T1', f.persistence, f.persistence_mae_pp],
+    ['Curve (step 5)', f.curve, f.curve_mae_pp],
+  ] as const
+  const best = Math.min(...rows.map(([, , mae]) => mae))
+  const offsetHelps = d.mae_pp < d.slid_mae_pp
+  return (
+    <Step n={6} title="Carry the T0 → T1 change forward to T2"
+      lede={<>A simpler idea than the curve: whatever changed between the previous scan and the current one will change
+        again by the next. Each scan&rsquo;s six points get their own 5th-degree polynomial, which passes through all six.
+        Lined up on the same moments in time (with Δ = 1 exactly, T0&rsquo;s 2-year point sits on T1&rsquo;s 1-year point),
+        the gap between them is the <strong>offset</strong>. T1 is then slid on by the T1 → T2 gap
+        ({d.t1_gap.toFixed(2)} y) and the offset is added back on.</>}
+      code={{ file: 'backend/app/trajectory.py', text: 'dev = development_forecast(r0, r1, d01, d12)   # np.polyfit(k, r, 5) for each scan\ndev.offset    = r1 - P0(k + d01)\ndev.forecast  = P1(k + d12) + dev.offset' }}>
+      <Equation tex={String.raw`\hat r_2(k) = P_1(k + \Delta_{12}) + \underbrace{\big(r_1(k) - P_0(k + \Delta_{01})\big)}_{\text{offset}(k)}, \qquad k = 1,\dots,6`}>
+        <Tex tex="P_0, P_1" />: degree-5 polynomials through each scan&rsquo;s six points. For k = 6, <Tex tex={String.raw`k + \Delta`} /> lies past
+        the last point, so that value is extrapolated and can swing.
+      </Equation>
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <Panel title="Line T0 up with T1: years after T1"
+          caption={<>T0 moved back by Δ = {g.offset.toFixed(2)} y, so both describe the same moments. The vertical gap at each of
+            T1&rsquo;s points is the offset: how far the newer scan moved away from the older one.</>}>
+          <ClockChart series={lineUp} xMin={0} xMax={6} xLabel="years after T1" />
+          <SeriesLegend series={lineUp} />
+        </Panel>
+        <Panel title="Carry it forward: years after T2"
+          caption="T1’s polynomial read Δ₁₂ later is where T1 alone says T2 should be; the offset is the T0 → T1 trend on top.">
+          <ClockChart series={onT2} xMin={1} xMax={6} xLabel="years after T2" />
+          <SeriesLegend series={onT2} />
+        </Panel>
+      </div>
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full text-sm">
+          <caption className="sr-only">The offset and the resulting forecast of T2, per year</caption>
+          <thead className="bg-muted/50 text-xs text-muted-foreground">
+            <tr>
+              <th scope="col" className="px-3 py-2 text-left font-medium">Per year k</th>
+              {YEARS.map((y) => <th key={y} scope="col" className="px-2 py-2 text-right font-medium">{y} y</th>)}
+              <th scope="col" className="px-3 py-2 text-right font-medium">Mean error vs T2</th>
+            </tr>
+          </thead>
+          <tbody className="font-mono text-xs tabular-nums">
+            {([['T1, Sybil', r1], ['T0 at the same moment', d.t0_aligned]] as const).map(([name, vals]) => (
+              <tr key={name} className="border-t text-muted-foreground">
+                <th scope="row" className="px-3 py-2 text-left font-sans text-sm font-normal">{name}</th>
+                {vals.map((v, i) => <td key={i} className="px-2 py-2 text-right">{pc(v)}</td>)}
+                <td />
+              </tr>
+            ))}
+            <tr className="border-t">
+              <th scope="row" className="px-3 py-2 text-left font-sans text-sm font-medium">Offset</th>
+              {d.offset.map((v, i) => <td key={i} className="px-2 py-2 text-right">{v > 0 ? '+' : ''}{(v * 100).toFixed(1)}</td>)}
+              <td />
+            </tr>
+            <tr className="border-t bg-muted/30">
+              <th scope="row" className="px-3 py-2 text-left font-sans text-sm font-medium">Sybil on T2</th>
+              {f.sybil_t2.map((v, i) => <td key={i} className="px-2 py-2 text-right">{pc(v)}</td>)}
+              <td className="px-3 py-2 text-right text-muted-foreground">target</td>
+            </tr>
+            {rows.map(([name, pred, mae]) => (
+              <tr key={name} className="border-t">
+                <th scope="row" className="px-3 py-2 text-left font-sans text-sm font-medium">{name}</th>
+                {pred.map((v, i) => <td key={i} className="px-2 py-2 text-right">{pc(v)}</td>)}
+                <td className={`px-3 py-2 text-right ${mae === best ? 'font-semibold' : ''}`}>
+                  {pp(mae)} {mae === best && <Check className="inline size-3.5" aria-label="best" />}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="max-w-3xl text-sm text-muted-foreground">
+        The question is the first two rows: does adding the T0 → T1 offset bring the forecast closer to T2 than sliding T1
+        on alone? For participant {g.nlst_pid} it {offsetHelps ? 'does' : 'does not'} ({pp(d.mae_pp)} with, {pp(d.slid_mae_pp)} without).
+        Whether that holds across people is step 8&rsquo;s job.
+      </p>
+    </Step>
+  )
+}
+
+// --- step 7 -------------------------------------------------------------------
+
 function StepNetwork({ g }: { g: TrajectoryGuide }) {
   const switchId = useId()
   const [withOffset, setWithOffset] = useState(true)
   return (
-    <Step n={6} title="Let a small network learn the correction"
+    <Step n={7} title="Let a small network learn the correction"
       lede={<>The curve encodes one fixed assumption about how risk carries over. A model can instead <em>learn</em> how
         T0 and T1 relate to T2 across many people. The inputs are the 12 risks plus Δ; the outputs are T2&rsquo;s six risks.
         To answer &ldquo;does the offset help?&rdquo;, every model is trained twice: with all 13 inputs and with Δ removed.</>}
@@ -486,13 +597,13 @@ function StepNetwork({ g }: { g: TrajectoryGuide }) {
   )
 }
 
-// --- step 7 -------------------------------------------------------------------
+// --- step 8 -------------------------------------------------------------------
 
 function StepTrain({ g }: { g: TrajectoryGuide }) {
   const d = g.dataset
   const ready = d.metrics != null
   return (
-    <Step n={7} title="Train on many people, test on people the model never saw"
+    <Step n={8} title="Train on many people, test on people the model never saw"
       lede={<>One person can show <em>how</em> the method works, but not whether it works. The models are scored with
         repeated 5-fold cross-validation: each person&rsquo;s T2 is predicted by a model trained only on the others. A
         paired bootstrap then says whether &ldquo;with Δ&rdquo; beats &ldquo;without Δ&rdquo; by more than chance.</>}
@@ -518,7 +629,7 @@ function StepTrain({ g }: { g: TrajectoryGuide }) {
               without any change to the page.
             </p>
             <ul className="grid gap-2 text-sm sm:grid-cols-2">
-              {['T2 = T1', 'Curve (step 5)', 'Linear, 12 vs 13 inputs', 'MLP, 12 vs 13 inputs'].map((m) => (
+              {['T2 = T1', 'Curve (step 5)', 'T1 + offset (step 6)', 'Linear, 12 vs 13 inputs', 'MLP, 12 vs 13 inputs'].map((m) => (
                 <li key={m} className="rounded-lg border border-dashed px-3 py-2 text-muted-foreground">{m}</li>
               ))}
             </ul>
@@ -577,7 +688,7 @@ function Results({ g }: { g: TrajectoryGuide }) {
   )
 }
 
-// --- step 8 -------------------------------------------------------------------
+// --- step 9 -------------------------------------------------------------------
 
 function StepFindings({ g }: { g: TrajectoryGuide }) {
   const f = g.forecast
@@ -608,12 +719,12 @@ function StepFindings({ g }: { g: TrajectoryGuide }) {
       kind: 'idea' as const,
       title: 'What the models must learn',
       text: <>If the gap between curve and Sybil is systematic across people, a trained model can correct it. Whether Δ adds
-        anything on top is what step 7 answers, once enough people are in. Δ only ranges from about 0.86 to 1.25 years
+        anything on top is what step 8 answers, once enough people are in. Δ only ranges from about 0.86 to 1.25 years
         across NLST (5th to 95th percentile; {g.offset.toFixed(2)} here), so any effect is likely small.</>,
     },
   ]
   return (
-    <Step n={8} title="What this one person already tells us"
+    <Step n={9} title="What this one person already tells us"
       lede="Not a result, since it is one person, but useful for knowing what to look for in the full run.">
       <div className="grid gap-4 md:grid-cols-3">
         {findings.map((x) => (
