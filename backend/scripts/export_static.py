@@ -123,6 +123,20 @@ def main() -> int:
         write(f"{base.lstrip('/')}/export.blind.csv",
               fetch(f"{base}/export.csv?blind=true", text=True))
 
+    # The Experiment page, for everyone with all three rounds run and dated.
+    from app import experiment
+    from app.schemas import TrajectoryGuide
+
+    guides = 0
+    for pid in pids:
+        try:
+            body = TrajectoryGuide(**experiment.guide(pid)).model_dump(mode="json")
+        except experiment.NotReady:
+            continue
+        write(f"api/experiments/trajectory/{pid}/index.json", body)
+        guides += 1
+    print(f"experiment guides: {guides}")
+
     # Search runs in the browser over every participant. As plain objects that
     # is 11 MB, so strings are dictionary-coded and each person is one row.
     STATUS = {"eligible": "e", "excluded": "x", "no_usable_series": "u", "no_images": "n"}

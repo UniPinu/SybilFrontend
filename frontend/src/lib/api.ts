@@ -253,6 +253,49 @@ export type ParticipantResults = {
 
 export type SearchQuery = Record<string, string | number | boolean | null | undefined>
 
+/** One point of the T0 + T1 -> T2 experiment, on T0's clock (backend/app/experiment.py). */
+export type ClockPoint = { t: number; risk: number }
+
+export type ModelMetrics = {
+  mae_pp: number
+  rmse_pp: number
+  mae_6y_pp: number
+  mae_by_year_pp: number[]
+}
+
+export type TrajectoryGuide = {
+  nlst_pid: string
+  outcome: { diagnosed: boolean; years_rand_to_dx: number | null; stage: string | null } | null
+  scans: { round: 'T0' | 'T1' | 'T2'; years: number; risk_by_year: number[] }[]
+  /** years from T0 to T1, the 13th input */
+  offset: number
+  /** years from T0 to T2 */
+  t2_offset: number
+  align: { base: number; t0: ClockPoint[]; t1_shifted: ClockPoint[]; t1_on_t0_clock: ClockPoint[] }
+  curve: { t: number; combined: number; t0_only: number | null; t1_only: number | null; weight: number }[]
+  forecast: {
+    at: number
+    curve_at_t2: number
+    sybil_t2: number[]
+    curve: number[]
+    persistence: number[]
+    curve_mae_pp: number
+    persistence_mae_pp: number
+  }
+  network: { inputs: { name: string; value: number; x: number }[]; hidden: number; outputs: string[] }
+  dataset: {
+    file: string
+    n_participants: number
+    min_needed: number
+    includes_this_participant: boolean
+    metrics: Record<string, ModelMetrics> | null
+    offset_effect:
+      | { with: string; without: string; mean: number; lo: number; hi: number; a_better: number; n: number }[]
+      | null
+    this_participant: Record<string, number[]> | null
+  }
+}
+
 function queryString(query: SearchQuery): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
@@ -518,6 +561,7 @@ const readOnlyApi = {
   },
   exportUrl: (pid: string, blind: boolean) =>
     `${API_BASE}/api/participants/${pid}/export${blind ? '.blind' : ''}.csv`,
+  trajectoryGuide: (pid: string) => snap<TrajectoryGuide>(`/api/experiments/trajectory/${pid}`),
 }
 
 // --- the API --------------------------------------------------------------------
@@ -545,6 +589,7 @@ const liveApi = {
     ),
   exportUrl: (pid: string, blind: boolean) =>
     `${API_BASE}/api/participants/${pid}/export.csv${queryString({ blind: blind || null })}`,
+  trajectoryGuide: (pid: string) => get<TrajectoryGuide>(`/api/experiments/trajectory/${pid}`),
 }
 
 export const api = {

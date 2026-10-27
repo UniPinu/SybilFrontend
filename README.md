@@ -346,6 +346,36 @@ add the site's origin to the backend's CORS list, and redeploy.
 
 ---
 
+## Experiment: do T0 + T1 predict T2?
+
+Each scan gives six cumulative risks (years 1–6 after that scan). With three rounds per
+participant, [app/trajectory.py](backend/app/trajectory.py) tests whether T0's six numbers,
+T1's six numbers and the T0 → T1 offset (13 inputs) predict Sybil's six T2 numbers better than
+"T2 = T1". It contains:
+
+- **Combined curve:** monotone cubic (PCHIP) interpolation of T0's points (years 1–6) and T1's
+  points shifted onto T0's axis (years Δ+1 … Δ+6). T1's numbers are converted from "given
+  cancer-free at T1". Reading the curve at T2's date gives a no-training baseline.
+- **Linear regression and a hand-written numpy MLP** (13 → 8 tanh → 6, Adam), in logit space,
+  each fitted with and without the offset input.
+- **Repeated k-fold cross-validation** by participant, plus a paired bootstrap of the error
+  difference "with offset − without offset".
+
+```bash
+cd backend
+uv run python scripts/build_trajectories.py --n 100 --dry-run   # plan + time estimate
+uv run python scripts/build_trajectories.py --n 100             # ~4.5 min per participant; resumable
+uv run python scripts/fit_trajectory.py                         # the comparison table
+uv run python scripts/fit_trajectory.py --show 217203           # one participant's curve
+uv run python scripts/fit_trajectory.py --synthetic 200         # pipeline check, no Sybil needed
+```
+
+Results go to `backend/data/trajectories.csv`, one row per participant, written as each
+participant finishes. `--cancer-share 0.3` enriches the sample with people diagnosed within six
+years (about 2% of the population), which gives the models more spread to learn from.
+
+---
+
 ## Tests
 
 ```bash

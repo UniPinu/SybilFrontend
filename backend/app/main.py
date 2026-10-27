@@ -18,6 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app import copy as copy_text
 from app import data
+from app import experiment
 from app import participants as explore
 from app.config import settings
 from app.demo_data import DEMO_PATIENT_ID
@@ -35,6 +36,7 @@ from app.schemas import (
     RiskResult,
     RunRequest,
     RunStarted,
+    TrajectoryGuide,
 )
 from app.store import store
 
@@ -311,6 +313,15 @@ def participant_export(nlst_pid: str, blind: bool = False) -> PlainTextResponse:
         headers={"Content-Disposition": f'attachment; filename="sybil_{nlst_pid}.csv"'},
     )
 
+
+
+# --- Experiment: T0 + T1 -> T2 on one participant ----------------------------
+@app.get("/api/experiments/trajectory/{nlst_pid}", response_model=TrajectoryGuide)
+def trajectory_guide(nlst_pid: str) -> TrajectoryGuide:
+    try:
+        return TrajectoryGuide(**_explore(experiment.guide, nlst_pid))
+    except experiment.NotReady as exc:
+        raise HTTPException(409, str(exc)) from exc
 
 # --- serve the built frontend, if there is one ------------------------------
 if FRONTEND_DIST.exists():

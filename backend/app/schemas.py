@@ -212,3 +212,17 @@ class ParticipantResults(BaseModel):
     exams: List[ExamResult]
     reference: Optional[Dict[str, Any]] = None
     outcome: Optional[Dict[str, Any]] = None
+
+
+class TrajectoryGuide(BaseModel):
+    """The Experiment page: one participant's T0 + T1 -> T2 walk-through (app/experiment.py)."""
+    nlst_pid: str
+    outcome: Optional[Dict[str, Any]] = None
+    scans: List[Dict[str, Any]]
+    offset: float
+    t2_offset: float
+    align: Dict[str, Any]
+    curve: List[Dict[str, Any]]
+    forecast: Dict[str, Any]
+    network: Dict[str, Any]
+    dataset: Dict[str, Any]
