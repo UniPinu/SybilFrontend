@@ -18,6 +18,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app import copy as copy_text
 from app import data
+from app import development
 from app import experiment
 from app import participants as explore
 from app.config import settings
@@ -26,6 +27,8 @@ from app.jobs import jobs
 from app.runner import get_model, model_is_loaded, weights_present
 from app.schemas import (
     Cohort,
+    FeatureOverview,
+    FeatureParticipant,
     Health,
     Outcome,
     ParticipantDetail,
@@ -322,6 +325,40 @@ def trajectory_guide(nlst_pid: str) -> TrajectoryGuide:
         return TrajectoryGuide(**_explore(experiment.guide, nlst_pid))
     except experiment.NotReady as exc:
         raise HTTPException(409, str(exc)) from exc
+
+
+# --- Features: how Sybil's features develop across rounds -------------------
+def _features(call, *args, **kwargs):
+    try:
+        return call(*args, **kwargs)
+    except development.BadRequest as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except development.NoFeatures as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
+SPACE = Query("hidden", description="hidden (what the risk head reads) or encoder")
+MODEL = Query(None, ge=1, le=5, description="one network, 1..5; omit for all five")
+
+
+@app.get("/api/features/overview", response_model=FeatureOverview)
+def features_overview(space: str = SPACE, model: Optional[int] = MODEL) -> FeatureOverview:
+    return FeatureOverview(**_features(development.overview, space, model))
+
+
+@app.get("/api/features/participants/{nlst_pid}", response_model=FeatureParticipant)
+def features_participant(nlst_pid: str, space: str = SPACE,
+                         model: Optional[int] = MODEL) -> FeatureParticipant:
+    return FeatureParticipant(**_features(development.participant, nlst_pid, space, model))
+
+
+@app.get("/api/features/export.csv", response_class=PlainTextResponse)
+def features_export(space: str = SPACE, model: Optional[int] = MODEL) -> PlainTextResponse:
+    body = _features(development.export_csv, space, model)
+    name = f"sybil_features_{space}" + (f"_n{model}" if model else "") + ".csv"
+    return PlainTextResponse(body, media_type="text/csv",
+                             headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
 
 # --- serve the built frontend, if there is one ------------------------------
 if FRONTEND_DIST.exists():

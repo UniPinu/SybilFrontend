@@ -296,6 +296,104 @@ export type TrajectoryGuide = {
   }
 }
 
+// --- Features: how Sybil's features develop across rounds (backend/app/development.py) ---
+
+export type FeatureSpace = 'hidden' | 'encoder'
+
+export type Quantiles = { n: number; p5: number; p25: number; median: number; p75: number; p95: number; mean: number }
+
+export type FeaturePair = {
+  nlst_pid: string
+  from: 'T0' | 'T1'
+  to: 'T1' | 'T2'
+  years_apart: number
+  distance: number
+  per_year: number | null
+  percentile_vs_between: number | null
+  acquisition_changed: boolean
+  risk_visible_share: number | null
+  random_share: number | null
+  delta_logit_6y: number | null
+  delta_risk_6y: number
+}
+
+export type GroupComparison = {
+  labels: [string, string]
+  yes: Quantiles | null
+  no: Quantiles | null
+  test: { difference: number; p_value: number } | null
+}
+
+export type FeatureOverview = {
+  space: FeatureSpace
+  model: number | null
+  counts: { scans: number; participants: number; with_2_rounds: number; with_3_rounds: number; diagnosed: number }
+  heads_available: boolean
+  min_scans: number
+  dims: { kept: number; total: number; min_active: number } | null
+  map: {
+    explained: number[]
+    points: { nlst_pid: string; round: 'T0' | 'T1' | 'T2'; x: number; y: number; diagnosed: boolean | null }[]
+  } | null
+  stability: {
+    pairs: {
+      from: string
+      to: string
+      within: Quantiles | null
+      between: Quantiles | null
+      within_hist: number[]
+      between_hist: number[]
+      reidentification: {
+        queries: number; gallery: number; gallery_people: number; top1: number; chance: number; median_rank: number
+      } | null
+    }[]
+  } | null
+  drift: { from: string; to: string; n: number; shared_share: number; mean_change: number; shared_change: number }[] | null
+  visibility: { share: Quantiles; random_share: Quantiles; times_random_median: number } | null
+  groups: { diagnosis: GroupComparison; acquisition: GroupComparison } | null
+  forecast: {
+    n: number
+    alpha: number
+    methods: { method: string; description: string; rms_error: Quantiles; risk_mae_pp: number | null }[]
+  } | null
+  pairs: FeaturePair[]
+  participants: { nlst_pid: string; rounds: number[]; diagnosed: boolean | null; years_rand_to_dx: number | null }[]
+  hist_bins: number[]
+}
+
+export type FeatureParticipant = {
+  nlst_pid: string
+  space: FeatureSpace
+  model: number | null
+  outcome: { diagnosed: boolean | null; years_rand_to_dx: number | null }
+  rounds: {
+    round: 'T0' | 'T1' | 'T2'
+    exam_id: string
+    years: number
+    risk_by_year: number[]
+    acquisition: { manufacturer: string | null; kernel: string | null; thickness_mm: number | null }
+    x: number
+    y: number
+    active_share: number
+  }[]
+  pairs: FeaturePair[]
+  top_features: { label: string; network: number; index: number; z: number[]; raw: number[]; risk_weight: number | null }[]
+  forecast: {
+    alpha: number
+    sybil_t2: number[]
+    methods: { method: string; description: string; rms_error: number; risk_by_year: number[] | null }[]
+  } | null
+}
+
+function featureQuery(space: FeatureSpace, model: number | null): string {
+  return queryString({ space, model })
+}
+
+/** Where the snapshot keeps one space x network choice (scripts/export_static.py). */
+function featureDir(space: FeatureSpace, model: number | null): string {
+  return `/api/features/${space}/${model == null ? 'all' : `n${model}`}`
+}
+
 function queryString(query: SearchQuery): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(query)) {
@@ -562,6 +660,12 @@ const readOnlyApi = {
   exportUrl: (pid: string, blind: boolean) =>
     `${API_BASE}/api/participants/${pid}/export${blind ? '.blind' : ''}.csv`,
   trajectoryGuide: (pid: string) => snap<TrajectoryGuide>(`/api/experiments/trajectory/${pid}`),
+  featureOverview: (space: FeatureSpace, model: number | null) =>
+    get<FeatureOverview>(`${featureDir(space, model)}/overview.json`),
+  featureParticipant: (pid: string, space: FeatureSpace, model: number | null) =>
+    get<FeatureParticipant>(`${featureDir(space, model)}/participants/${pid}.json`),
+  featureExportUrl: (space: FeatureSpace, model: number | null) =>
+    `${API_BASE}${featureDir(space, model)}/export.csv`,
 }
 
 // --- the API --------------------------------------------------------------------
@@ -590,6 +694,12 @@ const liveApi = {
   exportUrl: (pid: string, blind: boolean) =>
     `${API_BASE}/api/participants/${pid}/export.csv${queryString({ blind: blind || null })}`,
   trajectoryGuide: (pid: string) => get<TrajectoryGuide>(`/api/experiments/trajectory/${pid}`),
+  featureOverview: (space: FeatureSpace, model: number | null) =>
+    get<FeatureOverview>(`/api/features/overview${featureQuery(space, model)}`),
+  featureParticipant: (pid: string, space: FeatureSpace, model: number | null) =>
+    get<FeatureParticipant>(`/api/features/participants/${pid}${featureQuery(space, model)}`),
+  featureExportUrl: (space: FeatureSpace, model: number | null) =>
+    `${API_BASE}/api/features/export.csv${featureQuery(space, model)}`,
 }
 
 export const api = {

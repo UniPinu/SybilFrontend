@@ -18,6 +18,7 @@ import numpy as np
 
 from app.attention import VolumeGeometry, collate_attention_grid
 from app.config import settings
+from app.features import encoder_mean
 
 log = logging.getLogger(__name__)
 
@@ -78,6 +79,10 @@ class RunnerResult:
     geometry: VolumeGeometry
     serie: Any
     timings: Dict[str, float] = field(default_factory=dict)
+    # per model, what the network extracted before scoring it (app/features.py):
+    # "hidden" (5, 512) is what the risk head reads, "encoder" (5, 512) is the
+    # encoder's map averaged over the cells that hold the scan
+    features: Dict[str, np.ndarray] = field(default_factory=dict)
 
     @property
     def elapsed(self) -> float:
@@ -132,11 +137,22 @@ def run_sybil(
 
     raw_per_model: List[List[float]] = []
     attentions: List[Dict[str, Any]] = []
+    encoded: List[np.ndarray] = []
     t_models = time.time()
     for k, net in enumerate(model.ensemble):
         emit("model", index=k + 1, of=len(model.ensemble))
-        with torch.no_grad():
-            pred = model._predict(net, [serie], return_attentions=True)
+        # A read-only hook on the encoder: the scores are untouched, so the
+        # parity with Sybil.predict() still holds.
+        encoder = getattr(net, "image_encoder", None)
+        hook = encoder.register_forward_hook(
+            lambda _m, _i, out: encoded.append(encoder_mean(out, geometry))
+        ) if encoder is not None else None
+        try:
+            with torch.no_grad():
+                pred = model._predict(net, [serie], return_attentions=True)
+        finally:
+            if hook is not None:
+                hook.remove()
         raw_per_model.append(list(pred.scores[0]))
         attentions.append(pred.attentions[0])
         log.info("model %d/%d done (%.1fs)", k + 1, len(model.ensemble), time.time() - t_models)
@@ -156,6 +172,11 @@ def run_sybil(
     grid = collate_attention_grid(stacked)
     timings["calibrating"] = round(time.time() - t0, 2)
 
+    features = {"hidden": np.stack([np.asarray(a["hidden"], dtype=np.float32).reshape(-1)
+                                    for a in attentions])}
+    if len(encoded) == len(attentions):
+        features["encoder"] = np.stack(encoded).astype(np.float32)
+
     return RunnerResult(
         calibrated=[float(x) for x in calibrated],
         raw_per_model=[[float(x) for x in row] for row in raw_per_model],
@@ -164,4 +185,5 @@ def run_sybil(
         geometry=geometry,
         serie=serie,
         timings=timings,
+        features=features,
     )

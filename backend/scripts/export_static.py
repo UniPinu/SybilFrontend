@@ -13,6 +13,9 @@ Some files have no endpoint of their own:
                                       frontend searches and filters it itself
   api/participants/<pid>/bundle.json  detail + results, normal and blind, for
                                       every participant (run or not)
+  api/features/<space>/<all|n1..n5>/  the Features page for each feature space
+                                      and network: overview.json, export.csv and
+                                      participants/<pid>.json
 The model is never loaded.
 
 Run:  uv run python scripts/export_static.py                # -> backend/static_export
@@ -136,6 +139,28 @@ def main() -> int:
         write(f"api/experiments/trajectory/{pid}/index.json", body)
         guides += 1
     print(f"experiment guides: {guides}")
+
+    # The Features page: every space x network choice, since the snapshot has no
+    # query strings. api/features/{space}/{all|n1..n5}/{overview.json, participants/, export.csv}
+    from app import development
+    from app.schemas import FeatureOverview, FeatureParticipant
+
+    shutil.rmtree(out / "api" / "features", ignore_errors=True)
+    feature_pids = development.participants_with_features()
+    for space in ("hidden", "encoder"):
+        for model in (None, 1, 2, 3, 4, 5):
+            base = f"api/features/{space}/{'all' if model is None else f'n{model}'}"
+            write(f"{base}/overview.json",
+                  FeatureOverview(**development.overview(space, model)).model_dump(mode="json"))
+            write(f"{base}/export.csv", development.export_csv(space, model))
+            for pid in feature_pids:
+                try:
+                    body = development.participant(pid, space, model)
+                except development.NoFeatures:
+                    continue
+                write(f"{base}/participants/{pid}.json",
+                      FeatureParticipant(**body).model_dump(mode="json"))
+    print(f"features: {len(feature_pids)} participants x 12 views")
 
     # Search runs in the browser over every participant. As plain objects that
     # is 11 MB, so strings are dictionary-coded and each person is one row.

@@ -1,5 +1,6 @@
 import { ExperimentView } from '@/components/experiment/ExperimentView'
 import { ExploreView } from '@/components/explore/ExploreView'
+import { FeaturesView } from '@/components/features/FeaturesView'
 import { SiteFooter } from '@/components/SiteFooter'
 import { StoryView } from '@/components/StoryView'
 import { VisualiserView } from '@/components/visualiser/VisualiserView'
@@ -21,13 +22,14 @@ const VIEWS = [
   { view: 'explore', label: 'Explore' },
   { view: 'visualiser', label: 'Visualiser' },
   { view: 'experiment', label: 'Experiment' },
+  { view: 'features', label: 'Features' },
 ] as const
 
-/** Four views share one shell: the homepage (research + `?p=` story), Explore, the Visualiser and the Experiment. */
+/** Five views share one shell: the homepage (research + `?p=` story), Explore, the Visualiser, the Experiment and Features. */
 export default function App() {
   const params = useSearchParams()
   const view = params.get('view')
-  const home = view !== 'explore' && view !== 'visualiser' && view !== 'experiment'
+  const home = !['explore', 'visualiser', 'experiment', 'features'].includes(view ?? '')
 
   return (
     <div className="min-h-dvh bg-background">
@@ -44,7 +46,7 @@ export default function App() {
             <Activity className="size-5" aria-hidden />
             <span className="max-sm:sr-only">CTscannr</span>
           </a>
-          {/* four views no longer fit beside the logo on a phone, so the switcher scrolls there */}
+          {/* five views no longer fit beside the logo on a phone, so the switcher scrolls there */}
           <nav className="flex min-w-0 items-center gap-1 overflow-x-auto" aria-label="Main">
             {home &&
               HOME_SECTIONS.map(([id, label]) => (
@@ -69,7 +71,7 @@ export default function App() {
       </header>
 
       {view === 'explore' ? <ExploreShell /> : view === 'visualiser' ? <VisualiserShell />
-        : view === 'experiment' ? <ExperimentShell /> : <StoryView />}
+        : view === 'experiment' ? <ExperimentShell /> : view === 'features' ? <FeaturesShell /> : <StoryView />}
     </div>
   )
 }
@@ -99,6 +101,16 @@ function ExploreShell() {
   return (
     <main className="mx-auto max-w-6xl space-y-16 px-4 pb-10">
       <ExploreView />
+      <SiteFooter health={health.data} />
+    </main>
+  )
+}
+
+function FeaturesShell() {
+  const health = useQuery({ queryKey: ['health'], queryFn: api.health, refetchInterval: 20_000 })
+  return (
+    <main className="mx-auto max-w-6xl space-y-16 px-4 pb-10">
+      <FeaturesView />
       <SiteFooter health={health.data} />
     </main>
   )

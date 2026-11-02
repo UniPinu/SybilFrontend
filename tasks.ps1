@@ -10,12 +10,13 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('help', 'setup', 'weights', 'candidates', 'pool', 'dev', 'build', 'serve',
+    [ValidateSet('help', 'setup', 'weights', 'candidates', 'pool', 'features', 'dev', 'build', 'serve',
                  'test', 'test-fast', 'test-slow', 'lint', 'clean-cache')]
     [string]$Task = 'help',
 
     [int]$Pool = 16,
     [int]$Reference = 12,
+    [int]$N = 40,
     [int]$Port = 8000
 )
 
@@ -36,6 +37,7 @@ setup        install everything (uv sync, pnpm install) and check the install
 weights      download Sybil's checkpoints and verify against the published scores
 candidates   build data/candidates.parquet from the IDC index (no scans downloaded)
 pool         prepare the curated pool + reference sample (-Pool 16 -Reference 12)
+features     extract Sybil's features for every round of -N 40 participants (~4.5 min each)
 dev          run uvicorn :8000 and vite :5173 together
 build        build the frontend into frontend/dist (the backend serves it)
 serve        build, then serve app + API on 0.0.0.0:8000 for the network (-Port 8000)
@@ -62,6 +64,10 @@ clean-cache  drop processed patients (keeps the ~700 MB of model weights)
         Invoke-In $backend {
             uv run python scripts/prepare_pool.py --pool $Pool --reference $Reference
         }
+    }
+
+    'features' {
+        Invoke-In $backend { uv run python scripts/build_features.py --n $N --cancer-share 0.3 }
     }
 
     'dev' {

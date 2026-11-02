@@ -11,12 +11,13 @@ import shutil
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional
 
+from app import features
 from app.config import settings
 from app.data import get_candidate, outcome_payload, without_outcome
 from app.demo_data import DEMO_PATIENT_ID, demo_dicom_paths
 from app.fetch import fetch_series, verify_series
 from app.render import render_patient
-from app.runner import run_sybil
+from app.runner import get_model, run_sybil
 from app.store import store
 
 log = logging.getLogger(__name__)
@@ -169,6 +170,11 @@ def process_patient(
                 **rendered.as_dict(),
             },
         )
+        # Outside the patient cache, so eviction never takes the features with it.
+        if result.features:
+            features.save(patient_id, result.features, raw_per_model=result.raw_per_model,
+                          risk_by_year=result.calibrated)
+            features.ensure_heads(get_model())
         if is_demo:
             store.write_outcome(
                 patient_id,

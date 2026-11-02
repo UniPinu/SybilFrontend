@@ -166,6 +166,12 @@
     --round-1: oklch(0.48 0.17 285);
     --round-2: oklch(0.5 0.18 335);
 
+    /* Features heatmap: standardized value below / above the population mean.
+       A diverging pair with the muted surface as its midpoint, validated for
+       colour-blind separation (dataviz validate_palette.js) in both themes. */
+    --diverge-neg: #2a75ba;
+    --diverge-pos: #c9690c;
+
     --scan-panel: oklch(0.16 0.01 260);
     --scan-panel-border: oklch(0.3 0.01 260);
 
@@ -198,6 +204,9 @@
     --round-0: oklch(0.78 0.11 235);
     --round-1: oklch(0.78 0.12 285);
     --round-2: oklch(0.78 0.13 335);
+
+    --diverge-neg: #5b97d4;
+    --diverge-pos: #cf7f3c;
 
     --chart-1: var(--risk-4);
     --chart-2: var(--reference-line);

@@ -1,15 +1,17 @@
-.PHONY: help check setup weights candidates pool dev dev-backend dev-frontend build test test-fast test-slow lint clean clean-cache static upload-static visualiser
+.PHONY: help check setup weights candidates pool features dev dev-backend dev-frontend build test test-fast test-slow lint clean clean-cache static upload-static visualiser
 
 BACKEND := backend
 FRONTEND := frontend
 POOL ?= 16
 REFERENCE ?= 12
+FEATURES_N ?= 40
 
 help:
 	@echo "setup       install everything (uv sync, pnpm install) and check the install"
 	@echo "weights     download Sybil's checkpoints and verify against published scores"
 	@echo "candidates  build data/candidates.parquet from the IDC index (no scans)"
 	@echo "pool        prepare the curated pool + reference sample (POOL=16 REFERENCE=12)"
+	@echo "features    extract Sybil's features for every round of FEATURES_N participants (~4.5 min each)"
 	@echo "dev         run uvicorn :8000 and vite :5173 together"
 	@echo "build       build the frontend into frontend/dist (served by the backend)"
 	@echo "test        smoke test + unit tests"
@@ -42,6 +44,9 @@ candidates:
 
 pool:
 	cd $(BACKEND) && uv run python scripts/prepare_pool.py --pool $(POOL) --reference $(REFERENCE)
+
+features:
+	cd $(BACKEND) && uv run python scripts/build_features.py --n $(FEATURES_N) --cancer-share 0.3
 
 dev-backend:
 	cd $(BACKEND) && uv run uvicorn app.main:app --port 8000 --reload

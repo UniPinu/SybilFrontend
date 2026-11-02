@@ -8,7 +8,7 @@ The app really runs Sybil. It picks a real, de-identified participant from the N
 Trial (NLST), fetches that one scan from the NCI Imaging Data Commons, runs the five-model ensemble on
 this machine, shows where the model looked, and then reveals what actually happened to that person.
 
-Three views:
+Five views:
 
 - **Homepage**: the research question (aligning Sybil's curves from T0, T1 and T2 on one clock, and
   using the T0 → T1 offset to nudge T1 towards T2), with diagrams built from a real participant, followed
@@ -16,6 +16,9 @@ Three views:
 - **Explore**: search participants and run several of their screening rounds.
 - **Visualiser**: one real scan followed through every step of the model in three.js, replayed from a
   recorded run (`make visualiser`, plan in [docs/visualiser-plan.md](docs/visualiser-plan.md)).
+- **Experiment**: the T0 + T1 → T2 risk-curve experiment, step by step on one participant.
+- **Features** (`?view=features`): the features Sybil's encoder extracts from each scan, followed
+  across a participant's rounds (see [Features](#features-how-sybils-features-develop)).
 
 Implements [MVP.md](MVP.md). Section numbers below refer to it.
 
@@ -275,6 +278,10 @@ CPU is fast enough: ~80 s for the full ensemble.
 | `POST /api/participants/{nlst_pid}/runs` | queue `{exam_ids}` (default: every runnable round) in round order |
 | `GET /api/participants/{nlst_pid}/results` | every finished round on one time axis, with the change since the previous round |
 | `GET /api/participants/{nlst_pid}/export.csv` | one row per finished round, for analysis |
+| `GET /api/experiments/trajectory/{nlst_pid}` | the Experiment page for one participant |
+| `GET /api/features/overview?space=hidden\|encoder&model=1..5` | the Features page: map, stability, drift, visibility, groups, forecast |
+| `GET /api/features/participants/{nlst_pid}` | one participant's rounds in feature space (same `space`, `model`) |
+| `GET /api/features/export.csv` | every scan's raw features, one row per scan (same `space`, `model`) |
 
 Explore shows outcomes by default, because about 4% of participants were ever diagnosed and
 finding them needs the filter. Every Explore endpoint takes `blind=true`, which drops all outcome
@@ -376,10 +383,68 @@ years (about 2% of the population), which gives the models more spread to learn 
 
 ---
 
+## Features: how Sybil's features develop
+
+Sybil scores one scan at a time and has no memory. This part leaves the risk score aside and keeps
+what Sybil *extracted* from each scan, then follows how those features move from T0 to T1 to T2.
+Sybil is not changed, retrained or given any memory; only its outputs are compared.
+
+**What is extracted.** Each of the five networks is a 3D ResNet-18 encoder → attention pooling →
+a 512-d vector → the risk head. Two vectors per network are saved for every scan
+([app/features.py](backend/app/features.py)):
+
+* `hidden`, the pooled 512-d embedding after the ReLU. The risk head is a function of this vector
+  alone, so it is everything Sybil carries forward from the scan. `Sybil._predict` already returns
+  it; the runner used to discard it.
+* `encoder`, the encoder's 512 × 25 × 16 × 16 output averaged over the cells that hold the scan.
+  The padding Sybil adds around short scans is left out, because its size depends on the scan's
+  length rather than the person.
+
+The networks were trained separately, so their dimensions are never averaged across models: the
+page compares one network, or all five standardized side by side. The features are written to
+`data/features/{exam_id}.npz`, outside the evictable patient cache, by every run (Story, Explore,
+scripts). The five risk heads are exported once to `data/features/heads.npz`, so the head can be
+re-run in numpy on any feature vector. On the demo scan this reproduces every network's raw score to
+4e-8 and the calibrated risks exactly; `tests/test_features.py` checks the same thing (`-m slow`).
+
+**What is measured** ([app/development.py](backend/app/development.py)). Every dimension is
+standardized over all scans (dims active in under 10% of scans are dropped; `hidden` is ~75% exact
+zeros), and the distance between two scans is the RMS of their standardized differences. Two
+unrelated scans are then about √2 ≈ 1.41 apart by construction.
+
+1. **Map**: PCA of every scan, each person's rounds joined in order.
+2. **Stability**: one person's two rounds vs two different people, and *re-identification*: does a
+   person's T1 vector pick their own T0 out of everyone's? This tests that the features describe the
+   person, so a change can be told apart from scan-to-scan noise.
+3. **Shared drift**: the share of the change that is common to everyone (ageing, scanner upgrades
+   between rounds) rather than personal.
+4. **What the score sees**: the head is piecewise linear in `hidden`, so near any scan one
+   direction moves the 6-year score and the rest are invisible to it. Each change is split along
+   that direction, against the 1/d share a random direction would get.
+5. **Groups**: change per year by later diagnosis, and by whether the scanner or kernel changed
+   (the main confound), with a permutation test.
+6. **Forecast**: T2's vector from T0 and T1 (no change; everyone's mean change; straight line;
+   damped line with α fitted leave-one-out), scored in feature units and, through Sybil's own head
+   and calibrator, as T2 risks.
+
+```bash
+cd backend
+uv run python scripts/build_features.py --n 40 --dry-run   # plan + time estimate
+uv run python scripts/build_features.py --n 40             # ~4.5 min per participant; resumable
+uv run python scripts/build_features.py --cached           # also every scan already in the cache
+```
+
+`build_features.py` draws participants as `build_trajectories.py` does (three eligible, dated
+rounds), enriched to 30% people diagnosed within six years by default, and also appends each finished
+participant to `data/trajectories.csv`. Scans run before features were saved are downloaded and run
+again; their scores come out identical.
+
+---
+
 ## Tests
 
 ```bash
-.\tasks.ps1 test-fast     # 120 tests, no model and no network, ~15 s
+.\tasks.ps1 test-fast     # ~150 tests, no model and no network, ~15 s
 .\tasks.ps1 test-slow     # runs the real ensemble on the demo scan, ~2 min
 .\tasks.ps1 test          # both, plus the runner-vs-upstream comparison
 ```
@@ -396,6 +461,9 @@ years (about 2% of the population), which gives the models more spread to learn 
   the DICOMs are deleted, and that no outcome field reaches `meta.json` or `result.json`.
 * `test_catalog.py` — the exam / participant tables on synthetic rows, round statuses, and the index
   query (run in DuckDB) keeping one series per participant and round.
+* `test_features.py` — the numpy risk head against Sybil's own layer, the risk gradient, the
+  padding-free encoder mean, feature storage, and the development analysis on synthetic people
+  (stable people are re-identified, shared drift is detected, linear trends are forecast).
 * `test_participants.py` — Explore search, filters and paging, round detail, batch runs in round
   order, results over time, CSV export, and that `blind=true` leaks no outcome anywhere.
 

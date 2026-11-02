@@ -226,3 +226,34 @@ class TrajectoryGuide(BaseModel):
     forecast: Dict[str, Any]
     network: Dict[str, Any]
     dataset: Dict[str, Any]
+
+
+class FeatureOverview(BaseModel):
+    """The Features page: how Sybil's features move across rounds, everyone at once (app/development.py)."""
+    space: str
+    model: Optional[int] = None
+    counts: Dict[str, int]
+    heads_available: bool
+    min_scans: int
+    dims: Optional[Dict[str, Any]] = None
+    map: Optional[Dict[str, Any]] = None
+    stability: Optional[Dict[str, Any]] = None
+    drift: Optional[List[Dict[str, Any]]] = None
+    visibility: Optional[Dict[str, Any]] = None
+    groups: Optional[Dict[str, Any]] = None
+    forecast: Optional[Dict[str, Any]] = None
+    pairs: List[Dict[str, Any]]
+    participants: List[Dict[str, Any]]
+    hist_bins: List[float]
+
+
+class FeatureParticipant(BaseModel):
+    """One participant's rounds in feature space (app/development.py)."""
+    nlst_pid: str
+    space: str
+    model: Optional[int] = None
+    outcome: Dict[str, Any]
+    rounds: List[Dict[str, Any]]
+    pairs: List[Dict[str, Any]]
+    top_features: List[Dict[str, Any]]
+    forecast: Optional[Dict[str, Any]] = None
